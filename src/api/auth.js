@@ -30,7 +30,9 @@ function _b32HrpExpand(hrp) {
 function _b32ConvertBits(data, from, to) {
   let acc = 0, bits = 0
   const ret = [], maxv = (1 << to) - 1
-  for (const v of data) { acc = (acc << from) | v; bits += from; while (bits >= to) { bits -= to; ret.push((acc >> bits) & maxv) } }
+  // Use >>> (unsigned right shift) — JS << truncates to 32-bit signed, so >>> is required
+  // to avoid sign-extension corrupting extracted 5-bit words for long URLs
+  for (const v of data) { acc = (acc << from) | v; bits += from; while (bits >= to) { bits -= to; ret.push((acc >>> bits) & maxv) } }
   if (bits > 0) ret.push((acc << (to - bits)) & maxv)
   return ret
 }
