@@ -127,6 +127,21 @@
         </p>
       </div>
 
+      <!-- Public URL (Cloudflare Tunnel) -->
+      <div class="form-group">
+        <label class="form-label">
+          Public URL
+          <span style="color:var(--muted);font-weight:400;">(optional — for internet access)</span>
+        </label>
+        <input class="form-input mono" type="url" id="public-url" placeholder="https://xxxx.trycloudflare.com">
+        <p class="form-hint">
+          Leave blank if you only want local network access.
+          For internet access, the installer sets up a <strong>Cloudflare Tunnel</strong> automatically —
+          run <code>sudo journalctl -u hashnode-tunnel -f</code> to get the URL and paste it here.
+          This URL is broadcast to other HashNode nodes via Nostr so they can link to your marketplace.
+        </p>
+      </div>
+
       <div id="nwc-error" class="alert alert-error" style="display:none"></div>
       <div id="nwc-ok" class="alert alert-success" style="display:none">✓ Connection verified!</div>
 
@@ -260,11 +275,13 @@ async function nextStep() {
     }
     // Auto-save if not yet tested
     try {
-      const nodeName = document.getElementById('node-name').value.trim()
+      const nodeName  = document.getElementById('node-name').value.trim()
+      const publicUrl = document.getElementById('public-url').value.trim()
       await api.post('/api/setup/init', {
         nwc_string:   nwc,
         owner_pubkey: pubkey,
-        node_name:    nodeName || undefined,
+        node_name:    nodeName  || undefined,
+        public_url:   publicUrl || undefined,
       })
     } catch (e) {
       document.getElementById('nwc-error').textContent = e.message
@@ -350,11 +367,13 @@ async function testNwc() {
   btn.textContent = 'Testing…'
 
   try {
-    const nodeName = document.getElementById('node-name').value.trim()
+    const nodeName  = document.getElementById('node-name').value.trim()
+    const publicUrl = document.getElementById('public-url').value.trim()
     await api.post('/api/setup/init', {
       nwc_string:   nwc,
       owner_pubkey: pubkey,
-      node_name:    nodeName || undefined,
+      node_name:    nodeName  || undefined,
+      public_url:   publicUrl || undefined,
     })
     okEl.style.display = ''
     showToast('Lightning connection verified!', 'success')

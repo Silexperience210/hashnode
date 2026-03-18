@@ -4,6 +4,7 @@ set -euo pipefail
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 RED='\033[0;31m'
+CYAN='\033[0;36m'
 NC='\033[0m'
 
 # 1. Check not running as root
@@ -39,7 +40,54 @@ else
   echo -e "${GREEN}avahi-daemon already installed.${NC}"
 fi
 
-# 5. Clone or update the repo
+# 5. Install cloudflared (Cloudflare Tunnel) for public internet access
+echo -e "${YELLOW}Installing cloudflared (Cloudflare Tunnel)...${NC}"
+if ! command -v cloudflared &>/dev/null; then
+  ARCH=$(dpkg --print-architecture)
+  case "$ARCH" in
+    arm64)  CF_DEB="cloudflared-linux-arm64.deb" ;;
+    armhf)  CF_DEB="cloudflared-linux-arm.deb" ;;
+    amd64)  CF_DEB="cloudflared-linux-amd64.deb" ;;
+    *)
+      echo -e "${YELLOW}Unknown arch $ARCH — skipping cloudflared install. Install manually from https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/${NC}"
+      CF_DEB=""
+      ;;
+  esac
+
+  if [ -n "$CF_DEB" ]; then
+    curl -fsSL "https://github.com/cloudflare/cloudflared/releases/latest/download/${CF_DEB}" -o /tmp/cloudflared.deb \
+      || { echo -e "${YELLOW}Could not download cloudflared — skipping.${NC}"; CF_DEB=""; }
+    if [ -n "$CF_DEB" ]; then
+      sudo dpkg -i /tmp/cloudflared.deb && rm /tmp/cloudflared.deb
+      echo -e "${GREEN}cloudflared installed.${NC}"
+    fi
+  fi
+else
+  echo -e "${GREEN}cloudflared already installed: $(cloudflared --version 2>&1 | head -1).${NC}"
+fi
+
+# 6. Create Cloudflare Tunnel systemd service (quick tunnel — no account required)
+sudo tee /etc/systemd/system/hashnode-tunnel.service > /dev/null <<'TUNNEL_EOF'
+[Unit]
+Description=HashNode Cloudflare Tunnel
+After=network.target hashnode.service
+Requires=hashnode.service
+
+[Service]
+Type=simple
+User=pi
+ExecStart=/usr/bin/cloudflared tunnel --url http://localhost:3000 --no-autoupdate
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
+TUNNEL_EOF
+echo -e "${GREEN}Cloudflare Tunnel service created.${NC}"
+
+# 7. Clone or update the repo
 if [ -d /opt/hashnode ]; then
   echo -e "${YELLOW}Updating existing HashNode installation...${NC}"
   cd /opt/hashnode && sudo git pull || { echo -e "${RED}Error: Failed to update repository.${NC}"; exit 1; }
@@ -50,27 +98,27 @@ else
   echo -e "${GREEN}Repository cloned.${NC}"
 fi
 
-# 6. Install npm dependencies
+# 8. Install npm dependencies
 echo -e "${YELLOW}Installing npm dependencies...${NC}"
 cd /opt/hashnode && sudo npm install --production || { echo -e "${RED}Error: npm install failed.${NC}"; exit 1; }
 echo -e "${GREEN}Dependencies installed.${NC}"
 
-# 7. Create data directory
-sudo mkdir -p /opt/hashnode/data || { echo -e "${RED}Error: Failed to create data directory.${NC}"; exit 1; }
+# 9. Create data directory and fix ownership
+sudo mkdir -p /opt/hashnode/data
+sudo chown -R pi:pi /opt/hashnode/data
 
-# 8. Copy .env.example to .env if not present
+# 10. Copy .env.example to .env if not present
 if [ ! -f /opt/hashnode/.env ]; then
   if [ -f /opt/hashnode/.env.example ]; then
     sudo cp /opt/hashnode/.env.example /opt/hashnode/.env
-    echo -e "${YELLOW}Created /opt/hashnode/.env from .env.example — edit it with your NWC string before starting.${NC}"
-  else
-    echo -e "${YELLOW}No .env.example found. You will need to create /opt/hashnode/.env manually.${NC}"
+    sudo chown pi:pi /opt/hashnode/.env
+    echo -e "${YELLOW}Created /opt/hashnode/.env — edit it before starting.${NC}"
   fi
 else
-  echo -e "${GREEN}.env already exists, skipping copy.${NC}"
+  echo -e "${GREEN}.env already exists.${NC}"
 fi
 
-# 9. Create systemd service file
+# 11. Create HashNode systemd service
 echo -e "${YELLOW}Creating systemd service...${NC}"
 sudo tee /etc/systemd/system/hashnode.service > /dev/null <<'EOF'
 [Unit]
@@ -85,38 +133,60 @@ ExecStart=/usr/bin/node server.js
 Restart=always
 RestartSec=10
 Environment=NODE_ENV=production
+EnvironmentFile=-/opt/hashnode/.env
 
 [Install]
 WantedBy=multi-user.target
 EOF
 echo -e "${GREEN}Systemd service created.${NC}"
 
-# 10. Set hostname to hashnode
+# 12. Set hostname to hashnode
 echo -e "${YELLOW}Setting hostname to 'hashnode'...${NC}"
 sudo hostnamectl set-hostname hashnode || { echo -e "${RED}Error: Failed to set hostname.${NC}"; exit 1; }
-echo -e "${GREEN}Hostname set to 'hashnode'.${NC}"
 
-# 11. Enable + start service
-echo -e "${YELLOW}Enabling and starting HashNode service...${NC}"
-sudo systemctl daemon-reload || { echo -e "${RED}Error: systemctl daemon-reload failed.${NC}"; exit 1; }
-sudo systemctl enable hashnode || { echo -e "${RED}Error: Failed to enable hashnode service.${NC}"; exit 1; }
+# 13. Enable + start services
+echo -e "${YELLOW}Enabling services...${NC}"
+sudo systemctl daemon-reload
+sudo systemctl enable hashnode
 sudo systemctl start hashnode || { echo -e "${RED}Error: Failed to start hashnode service.${NC}"; exit 1; }
-echo -e "${GREEN}HashNode service enabled and started.${NC}"
+sudo systemctl enable hashnode-tunnel
+sudo systemctl start hashnode-tunnel || echo -e "${YELLOW}Tunnel service failed to start — cloudflared may not be installed.${NC}"
+echo -e "${GREEN}Services started.${NC}"
 
-# 12. Get local IP
+# 14. Get local IP and tunnel URL
 LOCAL_IP=$(hostname -I | awk '{print $1}')
 
-# 13. Print success message
+# Wait a few seconds for tunnel to get its URL
+echo -e "${YELLOW}Waiting for Cloudflare Tunnel URL...${NC}"
+sleep 6
+TUNNEL_URL=$(sudo journalctl -u hashnode-tunnel -n 50 --no-pager 2>/dev/null \
+  | grep -oP 'https://[a-z0-9\-]+\.trycloudflare\.com' | head -1 || echo "")
+
+# 15. Success
 echo ""
-echo -e "${GREEN}======================================"
-echo -e "  HashNode installed successfully!"
-echo -e "======================================"
-echo -e "  Access your node at:"
+echo -e "${GREEN}╔══════════════════════════════════════╗"
+echo -e "║    ⛏  HashNode installed!             ║"
+echo -e "╚══════════════════════════════════════╝${NC}"
+echo ""
+echo -e "${CYAN}  Local network (same WiFi):${NC}"
 echo -e "    http://hashnode.local:3000"
 echo -e "    http://${LOCAL_IP}:3000"
-echo -e "${NC}"
-
-# 14. Reminder to configure .env
-echo -e "${YELLOW}Edit /opt/hashnode/.env with your NWC string then:${NC}"
-echo -e "  sudo systemctl restart hashnode"
+echo ""
+if [ -n "$TUNNEL_URL" ]; then
+  echo -e "${CYAN}  Public internet (Cloudflare Tunnel):${NC}"
+  echo -e "    ${GREEN}${TUNNEL_URL}${NC}"
+  echo ""
+  echo -e "${YELLOW}  → Copy this URL and paste it in the setup wizard (step 2)${NC}"
+  echo -e "${YELLOW}    so remote clients can find your node via Nostr P2P.${NC}"
+else
+  echo -e "${CYAN}  Public URL:${NC}"
+  echo -e "    Run: ${YELLOW}sudo journalctl -u hashnode-tunnel -f${NC}"
+  echo -e "    Look for: https://xxxx.trycloudflare.com"
+  echo -e "    Then paste it in the setup wizard (step 2)."
+fi
+echo ""
+echo -e "${YELLOW}  Next steps:${NC}"
+echo -e "    1. Open http://hashnode.local:3000 in your browser"
+echo -e "    2. Complete the setup wizard (NWC + Nostr identity)"
+echo -e "    3. Paste the Cloudflare URL in step 2 for internet access"
 echo ""

@@ -41,17 +41,18 @@ router.get('/status', (req, res) => {
   return res.json({
     complete,
     step,
-    node_pubkey: getNodePubkey(),
-    node_name:   getConfig('node_name') || '',
-    has_nwc:     hasNwc,
-    has_owner:   hasOwner,
+    node_pubkey:  getNodePubkey(),
+    node_name:    getConfig('node_name') || '',
+    public_url:   getConfig('cloudflare_url') || '',
+    has_nwc:      hasNwc,
+    has_owner:    hasOwner,
   })
 })
 
 // ── POST /init ────────────────────────────────────────────────────────────────
 router.post('/init', async (req, res) => {
   try {
-    const { nwc_string, owner_pubkey, node_name } = req.body || {}
+    const { nwc_string, owner_pubkey, node_name, public_url } = req.body || {}
 
     if (!nwc_string) return res.status(400).json({ error: 'nwc_string is required' })
     if (!owner_pubkey) return res.status(400).json({ error: 'owner_pubkey is required' })
@@ -73,7 +74,8 @@ router.post('/init', async (req, res) => {
     // Persist config
     setConfig('nwc_connection_string', nwc_string.trim())
     setConfig('owner_pubkey', owner_pubkey.trim())
-    if (node_name) setConfig('node_name', node_name.trim())
+    if (node_name)  setConfig('node_name', node_name.trim())
+    if (public_url) setConfig('cloudflare_url', public_url.trim())
 
     // Generate a stable JWT secret (stored in DB so it survives restarts)
     if (!getConfig('jwt_secret')) {
