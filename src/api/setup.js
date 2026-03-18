@@ -15,7 +15,7 @@ import { validateNWC, makeInvoice } from '../lib/nwc.js'
 import { scanForBitaxe, getBitaxeStats } from '../lib/bitaxe-scanner.js'
 import { getNodeKeypair, getNodePubkey } from '../lib/nostr-identity.js'
 import { isValidPubkey } from '../lib/nostr-auth.js'
-import { getTunnelUrl } from '../lib/tunnel.js'
+import { getTunnelUrl, stopTunnel, startTunnel } from '../lib/tunnel.js'
 
 const router = Router()
 
@@ -181,6 +181,24 @@ router.post('/add-miner', async (req, res) => {
     return res.status(201).json({ ok: true, miner_id: miner.id, hashrate_ths: hashrateSpec })
   } catch (err) {
     console.error('[setup/add-miner] error:', err)
+    return res.status(500).json({ error: 'Internal server error' })
+  }
+})
+
+// ── POST /cloudflare-token — save named tunnel token + restart tunnel ─────────
+router.post('/cloudflare-token', (req, res) => {
+  try {
+    const { token } = req.body || {}
+    if (!token || token.length < 20) {
+      return res.status(400).json({ error: 'Invalid token' })
+    }
+    setConfig('cloudflare_token', token.trim())
+    // Restart tunnel with named mode
+    stopTunnel()
+    setTimeout(() => startTunnel(parseInt(process.env.PORT || '3000', 10)), 500)
+    return res.json({ ok: true })
+  } catch (err) {
+    console.error('[setup/cloudflare-token] error:', err)
     return res.status(500).json({ error: 'Internal server error' })
   }
 })

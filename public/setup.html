@@ -127,39 +127,79 @@
         </p>
       </div>
 
-      <!-- Public URL — auto-detected from Cloudflare Tunnel -->
+      <!-- Public Access (Internet) -->
       <div class="form-group">
-        <label class="form-label">
-          Public URL
-          <span id="tunnel-badge" style="display:none;margin-left:6px;font-size:0.72rem;background:var(--green);color:#000;padding:2px 7px;border-radius:20px;font-weight:600;">AUTO</span>
-        </label>
+        <label class="form-label">Internet Access</label>
 
-        <!-- Detecting state -->
-        <div id="tunnel-detecting" style="display:flex;align-items:center;gap:10px;padding:10px 12px;background:var(--surface3);border-radius:var(--radius);border:1px solid var(--border);">
-          <div class="spinner" style="width:14px;height:14px;border-width:2px;flex-shrink:0;"></div>
-          <span style="font-size:0.82rem;color:var(--muted);">Waiting for Cloudflare Tunnel URL…</span>
-        </div>
-
-        <!-- Detected state -->
-        <div id="tunnel-ready" style="display:none;align-items:center;gap:10px;padding:10px 12px;background:rgba(34,197,94,0.08);border-radius:var(--radius);border:1px solid rgba(34,197,94,0.25);">
-          <span style="color:var(--green);font-size:1.1rem;flex-shrink:0;">✓</span>
-          <div style="flex:1;min-width:0;">
-            <div style="font-size:0.72rem;color:var(--muted);margin-bottom:2px;">Internet URL (auto-detected)</div>
-            <div id="tunnel-url-display" style="font-family:var(--font-mono);font-size:0.8rem;color:var(--green);word-break:break-all;"></div>
+        <!-- Mode selector -->
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:14px;">
+          <div class="tunnel-mode-card active" id="mode-quick" onclick="setTunnelMode('quick')">
+            <div style="font-size:1.2rem;margin-bottom:4px;">⚡</div>
+            <div style="font-weight:600;font-size:0.85rem;">Quick Tunnel</div>
+            <div style="font-size:0.72rem;color:var(--muted);margin-top:2px;">No account • URL changes on reboot</div>
           </div>
-          <button class="btn btn-ghost btn-sm" onclick="copyTunnelUrl()" id="btn-copy-tunnel">Copy</button>
+          <div class="tunnel-mode-card" id="mode-named" onclick="setTunnelMode('named')">
+            <div style="font-size:1.2rem;margin-bottom:4px;">🔒</div>
+            <div style="font-weight:600;font-size:0.85rem;">Permanent URL</div>
+            <div style="font-size:0.72rem;color:var(--muted);margin-top:2px;">Free Cloudflare account • URL never changes</div>
+          </div>
         </div>
 
-        <!-- Manual override -->
-        <input class="form-input mono" type="url" id="public-url"
-          placeholder="https://xxxx.trycloudflare.com (auto-filled above)"
-          style="margin-top:8px;font-size:0.8rem;"
-          autocomplete="off">
-        <p class="form-hint" style="margin-top:6px;">
-          Auto-detected from cloudflared running on this node. Only fill manually if
-          you're using a custom domain or self-managed tunnel.
-          This URL is broadcast to other HashNode nodes via Nostr.
-        </p>
+        <!-- Quick tunnel panel -->
+        <div id="panel-quick">
+          <!-- Detecting state -->
+          <div id="tunnel-detecting" style="display:flex;align-items:center;gap:10px;padding:10px 12px;background:var(--surface3);border-radius:var(--radius);border:1px solid var(--border);">
+            <div class="spinner" style="width:14px;height:14px;border-width:2px;flex-shrink:0;"></div>
+            <span style="font-size:0.82rem;color:var(--muted);">Connecting to Cloudflare…</span>
+          </div>
+          <!-- Ready state -->
+          <div id="tunnel-ready" style="display:none;align-items:center;gap:10px;padding:10px 12px;background:rgba(34,197,94,0.08);border-radius:var(--radius);border:1px solid rgba(34,197,94,0.25);">
+            <span style="color:var(--green);font-size:1.1rem;flex-shrink:0;">✓</span>
+            <div style="flex:1;min-width:0;">
+              <div style="font-size:0.72rem;color:var(--muted);margin-bottom:2px;">Your public URL (changes on reboot)</div>
+              <div id="tunnel-url-display" style="font-family:var(--font-mono);font-size:0.8rem;color:var(--green);word-break:break-all;"></div>
+            </div>
+            <button class="btn btn-ghost btn-sm" onclick="copyTunnelUrl()" id="btn-copy-tunnel">Copy</button>
+          </div>
+        </div>
+
+        <!-- Named tunnel panel (permanent URL) -->
+        <div id="panel-named" style="display:none;">
+          <div style="background:var(--surface3);border-radius:var(--radius);border:1px solid var(--border);padding:14px;margin-bottom:12px;">
+            <div style="font-weight:600;font-size:0.82rem;margin-bottom:10px;">3 étapes — 2 minutes — 100% gratuit</div>
+            <div style="display:flex;flex-direction:column;gap:8px;">
+              <div style="display:flex;gap:10px;align-items:flex-start;">
+                <div style="width:20px;height:20px;border-radius:50%;background:var(--btc);color:#000;font-size:0.7rem;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0;">1</div>
+                <div style="font-size:0.82rem;">
+                  Crée un compte gratuit sur
+                  <a href="https://dash.cloudflare.com/sign-up" target="_blank" rel="noopener" style="color:var(--btc);">cloudflare.com</a>
+                </div>
+              </div>
+              <div style="display:flex;gap:10px;align-items:flex-start;">
+                <div style="width:20px;height:20px;border-radius:50%;background:var(--btc);color:#000;font-size:0.7rem;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0;">2</div>
+                <div style="font-size:0.82rem;">
+                  Va dans <strong>Zero Trust → Networks → Tunnels → Create a tunnel</strong>
+                  → choisis <strong>Cloudflared</strong> → copie le token affiché
+                </div>
+              </div>
+              <div style="display:flex;gap:10px;align-items:flex-start;">
+                <div style="width:20px;height:20px;border-radius:50%;background:var(--btc);color:#000;font-size:0.7rem;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0;">3</div>
+                <div style="font-size:0.82rem;">Colle le token ci-dessous → URL permanente activée</div>
+              </div>
+            </div>
+          </div>
+          <input class="form-input mono" type="password" id="cf-token"
+            placeholder="eyJh…"
+            autocomplete="off">
+          <div id="cf-token-status" style="display:none;margin-top:8px;"></div>
+          <button class="btn btn-primary btn-block" style="margin-top:10px;" onclick="saveCfToken()">
+            🔒 Activer URL Permanente
+          </button>
+        </div>
+
+        <!-- Hidden field keeps the final public URL -->
+        <input type="hidden" id="public-url">
+        <p class="form-hint" style="margin-top:8px;">Cette URL est partagée avec les autres nodes HashNode via Nostr pour que tes mineurs soient découvrables.</p>
       </div>
 
       <div id="nwc-error" class="alert alert-error" style="display:none"></div>
@@ -337,32 +377,38 @@ function goToStep(n) {
   window.scrollTo(0, 0)
 }
 
-// ── Cloudflare Tunnel auto-detection (SSE) ─────────────────────────────────────
-let tunnelUrl = null
+// ── Tunnel mode selector ───────────────────────────────────────────────────────
+let tunnelMode = 'quick'  // 'quick' | 'named'
+let tunnelUrl  = null
 
+function setTunnelMode(mode) {
+  tunnelMode = mode
+  document.getElementById('mode-quick').classList.toggle('active', mode === 'quick')
+  document.getElementById('mode-named').classList.toggle('active', mode === 'named')
+  document.getElementById('panel-quick').style.display = mode === 'quick' ? '' : 'none'
+  document.getElementById('panel-named').style.display = mode === 'named' ? '' : 'none'
+}
+
+// ── Cloudflare Quick Tunnel — SSE auto-detection ───────────────────────────────
 function startTunnelDetection() {
+  if (tunnelMode !== 'quick') return
   const es = new EventSource('/api/setup/tunnel-url')
   es.onmessage = (e) => {
     try {
       const { url } = JSON.parse(e.data)
       if (url) {
         tunnelUrl = url
-        // Auto-fill the manual input only if empty
-        const manualInput = document.getElementById('public-url')
-        if (!manualInput.value) manualInput.value = url
-
-        // Show detected state
+        document.getElementById('public-url').value = url
         document.getElementById('tunnel-detecting').style.display = 'none'
         document.getElementById('tunnel-ready').style.display = 'flex'
         document.getElementById('tunnel-url-display').textContent = url
-        document.getElementById('tunnel-badge').style.display = ''
-        showToast('🌍 Public URL ready! Clients can now reach your node.', 'success')
+        showToast('🌍 URL publique prête !', 'success')
       } else {
-        // Timed out — cloudflared not installed
         document.getElementById('tunnel-detecting').innerHTML =
           `<span style="color:var(--muted);font-size:0.82rem;">
-            cloudflared not found — <a href="https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/" target="_blank">install it</a>
-            or enter a public URL manually below. Local network still works.
+            cloudflared introuvable —
+            <a href="https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/" target="_blank">installe-le</a>
+            ou utilise l'URL permanente (option droite).
           </span>`
       }
     } catch {}
@@ -375,9 +421,64 @@ function copyTunnelUrl() {
   const url = tunnelUrl || document.getElementById('tunnel-url-display').textContent
   if (!url) return
   navigator.clipboard.writeText(url).then(() => {
-    document.getElementById('btn-copy-tunnel').textContent = 'Copied!'
+    document.getElementById('btn-copy-tunnel').textContent = 'Copié!'
     setTimeout(() => { document.getElementById('btn-copy-tunnel').textContent = 'Copy' }, 2000)
   })
+}
+
+// ── Cloudflare Named Tunnel (permanent URL) ────────────────────────────────────
+async function saveCfToken() {
+  const token  = document.getElementById('cf-token').value.trim()
+  const status = document.getElementById('cf-token-status')
+  if (!token) {
+    status.innerHTML = `<div class="alert alert-error">Colle le token Cloudflare (commence par eyJ…)</div>`
+    status.style.display = ''
+    return
+  }
+
+  const btn = document.querySelector('#panel-named .btn-primary')
+  btn.disabled = true
+  btn.textContent = 'Activation…'
+  status.style.display = 'none'
+
+  try {
+    // Send token to backend — it will restart cloudflared with named tunnel mode
+    await api.post('/api/setup/cloudflare-token', { token })
+    status.innerHTML = `
+      <div style="display:flex;align-items:center;gap:8px;padding:10px 12px;background:rgba(34,197,94,0.08);border-radius:var(--radius);border:1px solid rgba(34,197,94,0.25);">
+        <span style="color:var(--green);">✓</span>
+        <div style="font-size:0.82rem;">Token enregistré — tunnel permanent en cours de démarrage…</div>
+      </div>`
+    status.style.display = ''
+    showToast('Token Cloudflare sauvegardé !', 'success')
+    // Wait for named tunnel URL to appear via SSE
+    const es = new EventSource('/api/setup/tunnel-url')
+    es.onmessage = (ev) => {
+      try {
+        const { url } = JSON.parse(ev.data)
+        if (url) {
+          tunnelUrl = url
+          document.getElementById('public-url').value = url
+          status.innerHTML = `
+            <div style="display:flex;align-items:center;gap:8px;padding:10px 12px;background:rgba(34,197,94,0.08);border-radius:var(--radius);border:1px solid rgba(34,197,94,0.25);">
+              <span style="color:var(--green);font-size:1.1rem;">✓</span>
+              <div style="flex:1">
+                <div style="font-size:0.72rem;color:var(--muted);">URL permanente active</div>
+                <div style="font-family:var(--font-mono);font-size:0.82rem;color:var(--green);word-break:break-all;">${url}</div>
+              </div>
+            </div>`
+          showToast('🔒 URL permanente activée !', 'success')
+        }
+      } catch {}
+      es.close()
+    }
+    es.onerror = () => es.close()
+  } catch (e) {
+    status.innerHTML = `<div class="alert alert-error">${e.message}</div>`
+    status.style.display = ''
+    btn.disabled = false
+    btn.textContent = '🔒 Activer URL Permanente'
+  }
 }
 
 // ── Get Nostr pubkey from extension ────────────────────────────────────────────

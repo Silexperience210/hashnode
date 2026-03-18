@@ -680,6 +680,24 @@ select.form-input option { background: var(--surface3); }
    ============================================================ */
 
 .scan-list { display: flex; flex-direction: column; gap: 8px; margin-top: 16px; }
+
+/* Tunnel mode selector cards */
+.tunnel-mode-card {
+  padding: 14px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface3);
+  cursor: pointer;
+  text-align: center;
+  transition: border-color .15s, background .15s;
+  user-select: none;
+}
+.tunnel-mode-card:hover { border-color: var(--border-bright); }
+.tunnel-mode-card.active {
+  border-color: var(--btc);
+  background: var(--btc-glow);
+}
+.tunnel-mode-card.active div:first-child { filter: none; }
 .scan-item {
   background: var(--surface3); border: 1px solid var(--border);
   border-radius: var(--radius); padding: 12px 14px;
