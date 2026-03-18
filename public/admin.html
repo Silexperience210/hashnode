@@ -1,0 +1,472 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>HashNode — Admin</title>
+  <meta name="description" content="HashNode admin panel — manage miners, rentals, peers.">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>⛏</text></svg>">
+  <link rel="stylesheet" href="/css/app.css">
+</head>
+<body>
+
+<!-- ── Navbar ──────────────────────────────────────────────────────────────── -->
+<nav class="navbar">
+  <div class="nav-inner">
+    <a href="/" class="nav-brand">
+      <span class="nav-brand-icon">⛏</span>
+      Hash<span>Node</span>
+    </a>
+    <div class="nav-links" id="nav-auth">
+      <span class="nav-badge admin">Admin</span>
+    </div>
+  </div>
+</nav>
+
+<div class="toast-container" id="toast-container"></div>
+
+<!-- ── Add / Edit Miner Modal ─────────────────────────────────────────────── -->
+<div class="modal-backdrop" id="modal-miner">
+  <div class="modal">
+    <div class="modal-header">
+      <span class="modal-title" id="miner-modal-title">Add Miner</span>
+      <button class="modal-close" onclick="closeModal('modal-miner')">×</button>
+    </div>
+    <div id="miner-modal-error" class="alert alert-error" style="display:none"></div>
+    <div class="form-group">
+      <label class="form-label">Name</label>
+      <input class="form-input" type="text" id="m-name" placeholder="Bitaxe #1">
+    </div>
+    <div class="form-group">
+      <label class="form-label">IP Address</label>
+      <input class="form-input mono" type="text" id="m-ip" placeholder="192.168.1.100">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Model</label>
+      <input class="form-input" type="text" id="m-model" placeholder="Bitaxe Ultra">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Hashrate (TH/s)</label>
+      <input class="form-input" type="number" id="m-hashrate" placeholder="0.5" step="0.01">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Price (sats/min)</label>
+      <input class="form-input" type="number" id="m-rate" placeholder="10" min="1">
+    </div>
+    <input type="hidden" id="m-id">
+    <div style="display:flex;gap:10px;margin-top:8px;">
+      <button class="btn btn-ghost" style="flex:1" onclick="closeModal('modal-miner')">Cancel</button>
+      <button class="btn btn-primary" style="flex:2" id="btn-save-miner" onclick="saveMiner()">Save Miner</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Page ────────────────────────────────────────────────────────────────── -->
+<div class="page">
+  <div class="container">
+
+    <!-- Title -->
+    <div class="section-header" style="margin-bottom:32px;">
+      <div>
+        <h1 style="font-size:1.5rem;font-weight:800;">Admin Panel</h1>
+        <p style="color:var(--muted);font-size:0.875rem;margin-top:4px;">Manage your HashNode</p>
+      </div>
+      <button class="btn btn-ghost btn-sm" id="btn-health" onclick="runHealthCheck()">⚙ Health Check</button>
+    </div>
+
+    <!-- ── Stats row ──────────────────────────────────────────────── -->
+    <div class="stat-grid" id="stats-grid">
+      <div class="stat-card skeleton" style="height:90px;"></div>
+      <div class="stat-card skeleton" style="height:90px;"></div>
+      <div class="stat-card skeleton" style="height:90px;"></div>
+      <div class="stat-card skeleton" style="height:90px;"></div>
+    </div>
+
+    <!-- ── Fleet Management ───────────────────────────────────────── -->
+    <div class="section-header">
+      <h2 class="section-title">Fleet</h2>
+      <button class="btn btn-primary btn-sm" onclick="openAddMiner()">+ Add Miner</button>
+    </div>
+
+    <div class="fleet-list" id="fleet-list">
+      <div class="skeleton" style="height:58px;border-radius:var(--radius);"></div>
+      <div class="skeleton" style="height:58px;border-radius:var(--radius);margin-top:8px;"></div>
+    </div>
+
+    <!-- ── Rentals Table ──────────────────────────────────────────── -->
+    <div class="section-header" style="margin-top:40px;">
+      <h2 class="section-title">All Rentals</h2>
+      <span id="rentals-count" class="badge badge-active" style="display:none;"></span>
+    </div>
+
+    <div class="table-wrap" id="rentals-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>User</th>
+            <th>Miner</th>
+            <th>Duration</th>
+            <th>Pool</th>
+            <th>Payout</th>
+            <th>Amount</th>
+            <th>Status</th>
+            <th>Started</th>
+          </tr>
+        </thead>
+        <tbody id="rentals-body">
+          <tr><td colspan="8" style="text-align:center;color:var(--muted);padding:32px;">Loading…</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- ── Peers ──────────────────────────────────────────────────── -->
+    <div class="section-header" style="margin-top:40px;">
+      <h2 class="section-title">Peers</h2>
+      <span id="peers-count" class="badge badge-available" style="display:none;"></span>
+    </div>
+    <p style="font-size:0.85rem;color:var(--muted);margin-bottom:16px;">
+      Other HashNode operators discovered via mDNS (local network) or Nostr relay.
+    </p>
+
+    <div class="peer-list" id="peer-list">
+      <div class="skeleton" style="height:54px;border-radius:var(--radius);"></div>
+    </div>
+
+    <!-- ── Health ─────────────────────────────────────────────────── -->
+    <div id="health-result" style="display:none;margin-top:32px;">
+      <div class="section-header">
+        <h2 class="section-title">Health Report</h2>
+      </div>
+      <div id="health-content" class="card"></div>
+    </div>
+
+  </div>
+</div>
+
+<footer>
+  <div class="container">
+    <p>⛏ HashNode — Self-hosted Bitcoin miner rental · Lightning &amp; Nostr</p>
+  </div>
+</footer>
+
+<script src="/js/api.js"></script>
+<script src="/js/auth.js"></script>
+<script>
+// ── Helpers ────────────────────────────────────────────────────────────────────
+function esc(s) {
+  return String(s == null ? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;')
+}
+function showToast(msg, type = 'info') {
+  const c = document.getElementById('toast-container')
+  const t = document.createElement('div')
+  t.className = `toast ${type}`
+  const icon = type === 'success' ? '✓' : type === 'error' ? '✕' : '⚡'
+  t.innerHTML = `<span>${icon}</span><span>${esc(msg)}</span>`
+  c.appendChild(t)
+  setTimeout(() => { t.classList.add('closing'); setTimeout(() => t.remove(), 300) }, 3500)
+}
+function openModal(id)  { document.getElementById(id).classList.add('open') }
+function closeModal(id) { document.getElementById(id).classList.remove('open') }
+function fmtMins(m) {
+  m = parseInt(m) || 0
+  if (m >= 1440) return `${Math.floor(m/1440)}d`
+  if (m >= 60)   return `${Math.floor(m/60)}h ${m%60>0?m%60+'m':''}`
+  return `${m}m`
+}
+function addrShort(a) {
+  if (!a) return '—'
+  return a.length > 16 ? a.slice(0,8)+'…'+a.slice(-6) : a
+}
+
+// ── Nav ────────────────────────────────────────────────────────────────────────
+function updateNav() {
+  const u = Auth.getUser()
+  if (!u) return
+  const pubShort = u.pubkey.slice(0, 8) + '…' + u.pubkey.slice(-4)
+  document.getElementById('nav-auth').innerHTML =
+    `<span class="nav-user">${esc(pubShort)}</span>
+     <span class="nav-badge admin">Admin</span>
+     <a href="/dashboard.html" class="btn btn-ghost btn-sm">Dashboard</a>
+     <button class="btn btn-ghost btn-sm" onclick="Auth.logout()">Logout</button>`
+}
+
+// ── Stats ──────────────────────────────────────────────────────────────────────
+async function loadStats() {
+  try {
+    const data = await api.get('/api/admin/stats')
+    document.getElementById('stats-grid').innerHTML = `
+      <div class="stat-card">
+        <div class="stat-card-label">Total Miners</div>
+        <div class="stat-card-val">${data.total_miners || 0}</div>
+        <div class="stat-card-sub">${data.online_miners || 0} online</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-card-label">Active Rentals</div>
+        <div class="stat-card-val" style="color:var(--btc)">${data.active_rentals || 0}</div>
+        <div class="stat-card-sub">${data.total_rentals || 0} all time</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-card-label">Total Revenue</div>
+        <div class="stat-card-val btc">${(data.total_revenue_sats || 0).toLocaleString()}</div>
+        <div class="stat-card-sub">sats earned</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-card-label">Total Users</div>
+        <div class="stat-card-val">${data.total_users || 0}</div>
+        <div class="stat-card-sub">unique pubkeys</div>
+      </div>`
+  } catch (e) {
+    document.getElementById('stats-grid').innerHTML =
+      `<div class="alert alert-error" style="grid-column:1/-1">Failed to load stats: ${esc(e.message)}</div>`
+  }
+}
+
+// ── Fleet ──────────────────────────────────────────────────────────────────────
+let allMiners = []
+
+async function loadFleet() {
+  try {
+    const { miners } = await api.get('/api/miners')
+    allMiners = miners || []
+    renderFleet(allMiners)
+  } catch (e) {
+    document.getElementById('fleet-list').innerHTML =
+      `<div class="alert alert-error">Failed to load fleet: ${esc(e.message)}</div>`
+  }
+}
+
+function renderFleet(miners) {
+  const list = document.getElementById('fleet-list')
+  if (!miners.length) {
+    list.innerHTML = `
+      <div class="empty">
+        <div class="empty-icon">⛏️</div>
+        <div class="empty-title">No miners yet</div>
+        <div class="empty-text">Click "Add Miner" to add your first Bitaxe.</div>
+      </div>`
+    return
+  }
+  list.innerHTML = miners.map(m => {
+    const dotClass = !m.online ? 'offline' : (m.available ? 'online' : 'rented')
+    return `
+    <div class="fleet-item" id="fleet-${esc(m.id)}">
+      <div class="fleet-dot ${dotClass}"></div>
+      <div class="fleet-info">
+        <div class="fleet-name">${esc(m.name)}</div>
+        <div class="fleet-ip">${esc(m.ip || '—')} · ${esc(m.model || 'Bitaxe')}</div>
+      </div>
+      <div class="fleet-metrics">
+        <div class="fleet-metric">
+          <span class="fleet-metric-label">Hashrate</span>
+          <span class="fleet-metric-val">${esc(m.hashrate_ths)} TH/s</span>
+        </div>
+        <div class="fleet-metric">
+          <span class="fleet-metric-label">Rate</span>
+          <span class="fleet-metric-val" style="color:var(--btc);">${esc(m.sats_per_minute)} sat/m</span>
+        </div>
+        <div class="fleet-metric">
+          <span class="fleet-metric-label">Temp</span>
+          <span class="fleet-metric-val ${(m.temp||0)>70?'bad':(m.temp||0)>60?'warn':''}">${m.temp ? m.temp+'°C' : '—'}</span>
+        </div>
+      </div>
+      <div class="fleet-actions">
+        <button class="btn btn-ghost btn-sm" onclick="openEditMiner('${esc(m.id)}')">Edit</button>
+        <button class="btn btn-danger btn-sm" onclick="deleteMiner('${esc(m.id)}','${esc(m.name)}')">Del</button>
+      </div>
+    </div>`
+  }).join('')
+}
+
+function openAddMiner() {
+  document.getElementById('miner-modal-title').textContent = 'Add Miner'
+  document.getElementById('m-id').value       = ''
+  document.getElementById('m-name').value     = ''
+  document.getElementById('m-ip').value       = ''
+  document.getElementById('m-model').value    = ''
+  document.getElementById('m-hashrate').value = ''
+  document.getElementById('m-rate').value     = '10'
+  document.getElementById('miner-modal-error').style.display = 'none'
+  openModal('modal-miner')
+}
+
+function openEditMiner(id) {
+  const m = allMiners.find(x => x.id === id)
+  if (!m) return
+  document.getElementById('miner-modal-title').textContent = 'Edit Miner'
+  document.getElementById('m-id').value       = m.id
+  document.getElementById('m-name').value     = m.name || ''
+  document.getElementById('m-ip').value       = m.ip || ''
+  document.getElementById('m-model').value    = m.model || ''
+  document.getElementById('m-hashrate').value = m.hashrate_ths || ''
+  document.getElementById('m-rate').value     = m.sats_per_minute || 10
+  document.getElementById('miner-modal-error').style.display = 'none'
+  openModal('modal-miner')
+}
+
+async function saveMiner() {
+  const errEl = document.getElementById('miner-modal-error')
+  errEl.style.display = 'none'
+  const id       = document.getElementById('m-id').value
+  const name     = document.getElementById('m-name').value.trim()
+  const ip       = document.getElementById('m-ip').value.trim()
+  const model    = document.getElementById('m-model').value.trim()
+  const hashrate = parseFloat(document.getElementById('m-hashrate').value)
+  const rate     = parseInt(document.getElementById('m-rate').value)
+
+  if (!name || !ip) {
+    errEl.textContent = 'Name and IP are required.'
+    errEl.style.display = ''
+    return
+  }
+  const btn = document.getElementById('btn-save-miner')
+  btn.disabled = true
+  btn.textContent = 'Saving…'
+  try {
+    const body = { name, ip, model, hashrate_ths: hashrate, sats_per_minute: rate }
+    if (id) {
+      await api.patch(`/api/admin/miners/${id}`, body)
+      showToast('Miner updated!', 'success')
+    } else {
+      await api.post('/api/admin/miners', body)
+      showToast('Miner added!', 'success')
+    }
+    closeModal('modal-miner')
+    loadFleet()
+    loadStats()
+  } catch (e) {
+    errEl.textContent = e.message
+    errEl.style.display = ''
+  } finally {
+    btn.disabled = false
+    btn.textContent = 'Save Miner'
+  }
+}
+
+async function deleteMiner(id, name) {
+  if (!confirm(`Delete "${name}"? This cannot be undone.`)) return
+  try {
+    await api.del(`/api/admin/miners/${id}`)
+    showToast(`Deleted ${name}`, 'info')
+    loadFleet()
+    loadStats()
+  } catch (e) {
+    showToast('Delete failed: ' + e.message, 'error')
+  }
+}
+
+// ── Rentals ────────────────────────────────────────────────────────────────────
+async function loadRentals() {
+  try {
+    const { rentals } = await api.get('/api/admin/rentals')
+    const body = document.getElementById('rentals-body')
+    const countEl = document.getElementById('rentals-count')
+    if (!rentals || !rentals.length) {
+      body.innerHTML = `<tr><td colspan="8" style="text-align:center;color:var(--muted);padding:32px;">No rentals yet.</td></tr>`
+      return
+    }
+    countEl.textContent = `${rentals.length} total`
+    countEl.style.display = ''
+    body.innerHTML = rentals.map(r => {
+      const statusBadge = r.status === 'active'
+        ? `<span class="badge badge-active">Active</span>`
+        : r.status === 'pending'
+        ? `<span class="badge badge-pending">Pending</span>`
+        : `<span class="badge badge-done">${esc(r.status)}</span>`
+      const date = r.created_at ? new Date(r.created_at).toLocaleDateString() : '—'
+      const pubShort = r.user_pubkey ? r.user_pubkey.slice(0,10)+'…' : '—'
+      return `<tr>
+        <td class="td-mono" style="font-size:0.78rem;" title="${esc(r.user_pubkey)}">${esc(pubShort)}</td>
+        <td><strong>${esc(r.miner_name || '—')}</strong></td>
+        <td>${fmtMins(r.duration_minutes)}</td>
+        <td style="font-size:0.78rem;font-family:var(--font-mono);">${esc(r.pool_url ? r.pool_url.slice(0,28)+'…' : 'Default')}</td>
+        <td class="td-mono" style="font-size:0.78rem;" title="${esc(r.payout_address)}">${esc(addrShort(r.payout_address))}</td>
+        <td class="td-btc">${(r.amount_sats || 0).toLocaleString()}</td>
+        <td>${statusBadge}</td>
+        <td style="color:var(--muted);font-size:0.82rem;">${date}</td>
+      </tr>`
+    }).join('')
+  } catch (e) {
+    document.getElementById('rentals-body').innerHTML =
+      `<tr><td colspan="8" style="text-align:center;color:var(--red);padding:20px;">${esc(e.message)}</td></tr>`
+  }
+}
+
+// ── Peers ──────────────────────────────────────────────────────────────────────
+async function loadPeers() {
+  try {
+    const { peers } = await api.get('/api/admin/peers')
+    const list = document.getElementById('peer-list')
+    const countEl = document.getElementById('peers-count')
+    if (!peers || !peers.length) {
+      list.innerHTML = `
+        <div class="empty">
+          <div class="empty-icon">📡</div>
+          <div class="empty-title">No peers discovered yet</div>
+          <div class="empty-text">Peers appear when other HashNode operators are on your network or connected via Nostr.</div>
+        </div>`
+      return
+    }
+    countEl.textContent = `${peers.length} peer${peers.length !== 1 ? 's' : ''}`
+    countEl.style.display = ''
+    list.innerHTML = peers.map(p => `
+      <div class="peer-item">
+        <div style="font-size:1.2rem;flex-shrink:0;">${p.type === 'nostr' ? '🔮' : '📡'}</div>
+        <div class="peer-info">
+          <div class="peer-name">${esc(p.name || 'HashNode Peer')}</div>
+          <div class="peer-addr">${esc(p.address || p.pubkey || '—')}</div>
+        </div>
+        <span class="peer-miners">${p.miner_count || 0} miners</span>
+        <span class="peer-badge ${p.type === 'nostr' ? 'nostr' : 'mdns'}">${p.type === 'nostr' ? 'Nostr' : 'mDNS'}</span>
+      </div>`).join('')
+  } catch (e) {
+    document.getElementById('peer-list').innerHTML =
+      `<div class="alert alert-error">Failed to load peers: ${esc(e.message)}</div>`
+  }
+}
+
+// ── Health check ───────────────────────────────────────────────────────────────
+async function runHealthCheck() {
+  const btn = document.getElementById('btn-health')
+  btn.disabled = true
+  btn.textContent = 'Checking…'
+  const resultEl  = document.getElementById('health-result')
+  const contentEl = document.getElementById('health-content')
+  resultEl.style.display = ''
+  contentEl.innerHTML = `<div style="display:flex;align-items:center;gap:10px;"><div class="spinner"></div><span>Running health check…</span></div>`
+
+  try {
+    const data = await api.get('/api/admin/health')
+    const checks = data.checks || {}
+    contentEl.innerHTML = Object.entries(checks).map(([key, val]) => `
+      <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid var(--border);">
+        <span style="text-transform:capitalize;font-weight:500;">${esc(key.replace(/_/g,' '))}</span>
+        <span style="color:${val.ok ? 'var(--green)' : 'var(--red)'};">
+          ${val.ok ? '✓ OK' : '✕ ' + esc(val.message || 'Failed')}
+        </span>
+      </div>
+    `).join('') + `
+      <div style="padding-top:12px;font-size:0.8rem;color:var(--muted);">
+        Checked at ${new Date().toLocaleTimeString()}
+      </div>`
+    showToast('Health check complete.', data.ok ? 'success' : 'error')
+  } catch (e) {
+    contentEl.innerHTML = `<div class="alert alert-error">Health check failed: ${esc(e.message)}</div>`
+    showToast('Health check failed: ' + e.message, 'error')
+  } finally {
+    btn.disabled = false
+    btn.textContent = '⚙ Health Check'
+  }
+}
+
+// ── Init ───────────────────────────────────────────────────────────────────────
+document.addEventListener('DOMContentLoaded', () => {
+  if (!Auth.requireAdmin()) return
+  updateNav()
+  loadStats()
+  loadFleet()
+  loadRentals()
+  loadPeers()
+})
+</script>
+</body>
+</html>

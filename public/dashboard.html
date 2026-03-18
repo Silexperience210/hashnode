@@ -1,0 +1,334 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>HashNode — Mining Room</title>
+  <meta name="description" content="Your active Bitcoin mining rentals.">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>⛏</text></svg>">
+  <link rel="stylesheet" href="/css/app.css">
+</head>
+<body>
+
+<!-- ── Navbar ──────────────────────────────────────────────────────────────── -->
+<nav class="navbar">
+  <div class="nav-inner">
+    <a href="/" class="nav-brand">
+      <span class="nav-brand-icon">⛏</span>
+      Hash<span>Node</span>
+    </a>
+    <div class="nav-links" id="nav-auth">
+      <button class="btn btn-nostr btn-sm" id="btn-login">Connect Nostr</button>
+    </div>
+  </div>
+</nav>
+
+<div class="toast-container" id="toast-container"></div>
+
+<!-- ── Page ────────────────────────────────────────────────────────────────── -->
+<div class="page">
+  <div class="container">
+
+    <!-- Page title row -->
+    <div class="section-header" style="margin-bottom:28px;">
+      <div>
+        <h1 style="font-size:1.5rem;font-weight:800;line-height:1.2;">Mining Room</h1>
+        <p style="color:var(--muted);font-size:0.875rem;margin-top:4px;">Your active and recent rentals</p>
+      </div>
+      <a href="/" class="btn btn-ghost btn-sm">← Marketplace</a>
+    </div>
+
+    <!-- Active rentals -->
+    <div class="section-header">
+      <h2 class="section-title">
+        <span class="live-dot" id="live-indicator"></span>
+        Active Rentals
+      </h2>
+      <span id="active-count" class="badge badge-active" style="display:none;"></span>
+    </div>
+
+    <div id="active-grid" class="rental-cards-grid">
+      <div class="skeleton skeleton-card"></div>
+      <div class="skeleton skeleton-card"></div>
+    </div>
+
+    <!-- History -->
+    <div class="section-header" style="margin-top:48px;">
+      <h2 class="section-title">Rental History</h2>
+    </div>
+
+    <div class="table-wrap" id="history-wrap">
+      <table id="history-table">
+        <thead>
+          <tr>
+            <th>Miner</th>
+            <th>Duration</th>
+            <th>Pool</th>
+            <th>Payout Address</th>
+            <th>Amount</th>
+            <th>Status</th>
+            <th>Date</th>
+          </tr>
+        </thead>
+        <tbody id="history-body">
+          <tr><td colspan="7" style="text-align:center;color:var(--muted);padding:32px;">Loading…</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+  </div>
+</div>
+
+<footer>
+  <div class="container">
+    <p>⛏ HashNode — Self-hosted Bitcoin miner rental · Lightning &amp; Nostr</p>
+  </div>
+</footer>
+
+<script src="/js/api.js"></script>
+<script src="/js/auth.js"></script>
+<script>
+// ── Helpers ────────────────────────────────────────────────────────────────────
+function esc(s) {
+  return String(s == null ? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;')
+}
+
+function showToast(msg, type = 'info') {
+  const c = document.getElementById('toast-container')
+  const t = document.createElement('div')
+  t.className = `toast ${type}`
+  const icon = type === 'success' ? '✓' : type === 'error' ? '✕' : '⚡'
+  t.innerHTML = `<span>${icon}</span><span>${esc(msg)}</span>`
+  c.appendChild(t)
+  setTimeout(() => { t.classList.add('closing'); setTimeout(() => t.remove(), 300) }, 3500)
+}
+
+function fmtMins(m) {
+  m = parseInt(m) || 0
+  if (m >= 1440) return `${Math.floor(m/1440)}d ${m%1440>0?Math.floor((m%1440)/60)+'h':''}`
+  if (m >= 60)   return `${Math.floor(m/60)}h ${m%60>0?m%60+'m':''}`
+  return `${m}m`
+}
+
+function fmtCountdown(endTs) {
+  const rem = Math.max(0, endTs - Date.now())
+  const h = Math.floor(rem / 3600000)
+  const m = Math.floor((rem % 3600000) / 60000)
+  const s = Math.floor((rem % 60000) / 1000)
+  return `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`
+}
+
+function addrShort(addr) {
+  if (!addr) return '—'
+  if (addr.length <= 16) return addr
+  return addr.slice(0, 8) + '…' + addr.slice(-6)
+}
+
+// ── Nav ────────────────────────────────────────────────────────────────────────
+function updateNav() {
+  const u = Auth.getUser()
+  if (!u) return
+  const pubShort = u.pubkey.slice(0, 8) + '…' + u.pubkey.slice(-4)
+  document.getElementById('nav-auth').innerHTML =
+    `<span class="nav-user">${esc(pubShort)}</span>` +
+    (u.is_admin ? `<a href="/admin.html" class="nav-badge admin">Admin</a>` : '') +
+    `<button class="btn btn-ghost btn-sm" onclick="Auth.logout()">Logout</button>`
+}
+
+// ── Active rentals ─────────────────────────────────────────────────────────────
+let activeRentals = [], liveTimers = {}
+
+function renderActive(rentals) {
+  const grid = document.getElementById('active-grid')
+  const countEl = document.getElementById('active-count')
+
+  // Clear old countdown timers
+  Object.values(liveTimers).forEach(clearInterval)
+  liveTimers = {}
+
+  if (!rentals.length) {
+    grid.innerHTML = `
+      <div class="empty" style="grid-column:1/-1">
+        <div class="empty-icon">⛏️</div>
+        <div class="empty-title">No active rentals</div>
+        <div class="empty-text">
+          <a href="/">Browse the marketplace</a> to rent a miner.
+        </div>
+      </div>`
+    countEl.style.display = 'none'
+    document.getElementById('live-indicator').style.display = 'none'
+    return
+  }
+
+  countEl.textContent = `${rentals.length} active`
+  countEl.style.display = ''
+  document.getElementById('live-indicator').style.display = ''
+
+  grid.innerHTML = rentals.map(r => {
+    const endTs     = new Date(r.ends_at).getTime()
+    const startTs   = new Date(r.started_at).getTime()
+    const totalMs   = endTs - startTs
+    const pct       = Math.min(100, Math.max(0, Math.round((Date.now() - startTs) / totalMs * 100)))
+
+    return `
+    <div class="rental-card" id="rc-${esc(r.id)}">
+      <div class="rc-header">
+        <div class="rc-name">
+          <span class="live-dot"></span>
+          ${esc(r.miner_name)}
+        </div>
+        <div class="rc-countdown" id="cd-${esc(r.id)}">${fmtCountdown(endTs)}</div>
+      </div>
+
+      <div class="live-stats" id="ls-${esc(r.id)}">
+        <div class="live-stat">
+          <div class="live-stat-label">Hashrate</div>
+          <div class="live-stat-val btc" id="hs-${esc(r.id)}">${esc(r.live?.hashrate_ths || '—')} TH/s</div>
+        </div>
+        <div class="live-stat">
+          <div class="live-stat-label">Temp</div>
+          <div class="live-stat-val ${(r.live?.temp || 0) > 70 ? 'red' : (r.live?.temp || 0) > 60 ? 'yellow' : 'green'}" id="tmp-${esc(r.id)}">${r.live?.temp ? r.live.temp + '°C' : '—'}</div>
+        </div>
+        <div class="live-stat">
+          <div class="live-stat-label">Power</div>
+          <div class="live-stat-val" id="pwr-${esc(r.id)}">${r.live?.power_w ? r.live.power_w + 'W' : '—'}</div>
+        </div>
+      </div>
+
+      <div class="rc-progress-wrap">
+        <div class="rc-progress-labels">
+          <span>Elapsed: ${fmtMins(r.duration_minutes - Math.ceil((endTs - Date.now()) / 60000))}</span>
+          <span>${fmtMins(r.duration_minutes)} total</span>
+        </div>
+        <div class="progress">
+          <div class="progress-bar" id="pb-${esc(r.id)}" style="width:${pct}%"></div>
+        </div>
+      </div>
+
+      <div class="mining-config">
+        <div class="mc-row">
+          <span class="mc-key">Pool</span>
+          <span class="mc-val">${esc(r.pool_url || 'Default')}</span>
+        </div>
+        <div class="mc-row">
+          <span class="mc-key">Payout</span>
+          <span class="mc-val btc" title="${esc(r.payout_address)}">${esc(addrShort(r.payout_address))}</span>
+        </div>
+        <div class="mc-row">
+          <span class="mc-key">Worker</span>
+          <span class="mc-val">${esc(r.stratum_user || '—')}</span>
+        </div>
+        <div class="mc-row">
+          <span class="mc-key">Paid</span>
+          <span class="mc-val btc">${(r.amount_sats || 0).toLocaleString()} sats</span>
+        </div>
+      </div>
+    </div>`
+  }).join('')
+
+  // Start countdown timers
+  rentals.forEach(r => {
+    const endTs = new Date(r.ends_at).getTime()
+    const startTs = new Date(r.started_at).getTime()
+    const totalMs = endTs - startTs
+
+    liveTimers[r.id] = setInterval(() => {
+      const cdEl = document.getElementById(`cd-${r.id}`)
+      const pbEl = document.getElementById(`pb-${r.id}`)
+      if (!cdEl) { clearInterval(liveTimers[r.id]); return }
+      const rem = endTs - Date.now()
+      if (rem <= 0) {
+        cdEl.textContent = '00:00:00'
+        if (pbEl) pbEl.style.width = '100%'
+        clearInterval(liveTimers[r.id])
+        return
+      }
+      cdEl.textContent = fmtCountdown(endTs)
+      if (pbEl) {
+        const pct = Math.min(100, Math.round((Date.now() - startTs) / totalMs * 100))
+        pbEl.style.width = pct + '%'
+      }
+    }, 1000)
+  })
+}
+
+// ── Load data ──────────────────────────────────────────────────────────────────
+async function loadDashboard() {
+  if (!Auth.requireAuth()) return
+  try {
+    const { rentals } = await api.get('/api/rentals/active')
+    activeRentals = rentals || []
+    renderActive(activeRentals)
+  } catch (e) {
+    showToast('Failed to load active rentals: ' + e.message, 'error')
+    document.getElementById('active-grid').innerHTML =
+      `<div class="empty" style="grid-column:1/-1">
+        <div class="empty-icon">⚠️</div>
+        <div class="empty-title">Failed to load rentals</div>
+        <div class="empty-text">${esc(e.message)}</div>
+      </div>`
+  }
+}
+
+async function loadHistory() {
+  try {
+    const { rentals } = await api.get('/api/rentals/history')
+    const body = document.getElementById('history-body')
+    if (!rentals || !rentals.length) {
+      body.innerHTML = `<tr><td colspan="7" style="text-align:center;color:var(--muted);padding:32px;">No rental history yet.</td></tr>`
+      return
+    }
+    body.innerHTML = rentals.map(r => {
+      const statusBadge = r.status === 'active'
+        ? `<span class="badge badge-active">Active</span>`
+        : r.status === 'expired'
+        ? `<span class="badge badge-done">Expired</span>`
+        : `<span class="badge badge-done">${esc(r.status)}</span>`
+      const date = r.created_at ? new Date(r.created_at).toLocaleDateString() : '—'
+      return `<tr>
+        <td><strong>${esc(r.miner_name || '—')}</strong></td>
+        <td>${fmtMins(r.duration_minutes)}</td>
+        <td class="td-mono" style="font-size:0.78rem;">${esc(r.pool_url ? r.pool_url.slice(0,30) : 'Default')}</td>
+        <td class="td-mono" style="font-size:0.78rem;" title="${esc(r.payout_address)}">${esc(addrShort(r.payout_address))}</td>
+        <td class="td-btc">${(r.amount_sats || 0).toLocaleString()}</td>
+        <td>${statusBadge}</td>
+        <td style="color:var(--muted);">${date}</td>
+      </tr>`
+    }).join('')
+  } catch (e) {
+    document.getElementById('history-body').innerHTML =
+      `<tr><td colspan="7" style="text-align:center;color:var(--red);padding:20px;">${esc(e.message)}</td></tr>`
+  }
+}
+
+// ── Live stat refresh ──────────────────────────────────────────────────────────
+async function refreshLiveStats() {
+  for (const r of activeRentals) {
+    try {
+      const { live } = await api.get(`/api/rentals/${r.id}/live`)
+      if (!live) continue
+      const hsEl  = document.getElementById(`hs-${r.id}`)
+      const tmpEl = document.getElementById(`tmp-${r.id}`)
+      const pwrEl = document.getElementById(`pwr-${r.id}`)
+      if (hsEl)  hsEl.textContent  = (live.hashrate_ths || '—') + ' TH/s'
+      if (tmpEl) {
+        tmpEl.textContent = live.temp ? live.temp + '°C' : '—'
+        tmpEl.className = 'live-stat-val ' + (live.temp > 70 ? 'red' : live.temp > 60 ? 'yellow' : 'green')
+      }
+      if (pwrEl) pwrEl.textContent = live.power_w ? live.power_w + 'W' : '—'
+    } catch {}
+  }
+}
+
+// ── Init ───────────────────────────────────────────────────────────────────────
+document.addEventListener('DOMContentLoaded', () => {
+  document.getElementById('btn-login').onclick = () => { window.location.href = '/' }
+  updateNav()
+  loadDashboard()
+  loadHistory()
+  // Refresh live stats every 10s
+  setInterval(refreshLiveStats, 10000)
+})
+</script>
+</body>
+</html>

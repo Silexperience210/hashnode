@@ -1,0 +1,463 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>HashNode — Setup</title>
+  <meta name="description" content="Set up your self-hosted Bitcoin miner rental node.">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>⛏</text></svg>">
+  <link rel="stylesheet" href="/css/app.css">
+</head>
+<body>
+
+<div class="toast-container" id="toast-container"></div>
+
+<div class="setup-page">
+  <div class="setup-box">
+
+    <!-- Logo / header -->
+    <div class="setup-header">
+      <div class="setup-logo">⛏</div>
+      <h1 class="setup-title">Hash<span>Node</span></h1>
+      <p class="setup-subtitle">Self-hosted Bitcoin miner rental platform</p>
+    </div>
+
+    <!-- Step indicator -->
+    <div class="step-indicator" id="step-indicator">
+      <div class="setup-step active" id="si-1">
+        <div class="step-circle">1</div>
+        <span class="step-label">Welcome</span>
+        <div class="step-line"></div>
+      </div>
+      <div class="setup-step" id="si-2">
+        <div class="step-circle">2</div>
+        <span class="step-label">Lightning</span>
+        <div class="step-line"></div>
+      </div>
+      <div class="setup-step" id="si-3">
+        <div class="step-circle">3</div>
+        <span class="step-label">Miners</span>
+        <div class="step-line"></div>
+      </div>
+      <div class="setup-step" id="si-4">
+        <div class="step-circle">4</div>
+        <span class="step-label">Ready</span>
+      </div>
+    </div>
+
+    <!-- ── Step 1: Welcome ─────────────────────────────────── -->
+    <div class="setup-form" id="form-1">
+      <h2 class="setup-form-title">Welcome to HashNode</h2>
+      <p class="setup-form-desc">
+        This node will be your <strong>self-hosted Bitcoin miner rental platform</strong>.
+        Anyone on your network — or connected via Nostr — can rent your Bitaxe miners
+        and pay instantly over Lightning.
+      </p>
+
+      <div style="display:flex;flex-direction:column;gap:12px;margin-bottom:24px;">
+        <div style="display:flex;gap:12px;align-items:flex-start;padding:14px;background:var(--surface3);border-radius:var(--radius);">
+          <span style="font-size:1.4rem;flex-shrink:0;">⚡</span>
+          <div>
+            <div style="font-weight:600;font-size:0.9rem;margin-bottom:2px;">Lightning Payments</div>
+            <div style="font-size:0.8rem;color:var(--muted);">Receive sats per minute directly to your node wallet via NWC.</div>
+          </div>
+        </div>
+        <div style="display:flex;gap:12px;align-items:flex-start;padding:14px;background:var(--surface3);border-radius:var(--radius);">
+          <span style="font-size:1.4rem;flex-shrink:0;">🔑</span>
+          <div>
+            <div style="font-weight:600;font-size:0.9rem;margin-bottom:2px;">Nostr Identity</div>
+            <div style="font-size:0.8rem;color:var(--muted);">Renters authenticate with their Nostr key — no accounts, no email.</div>
+          </div>
+        </div>
+        <div style="display:flex;gap:12px;align-items:flex-start;padding:14px;background:var(--surface3);border-radius:var(--radius);">
+          <span style="font-size:1.4rem;flex-shrink:0;">⛏</span>
+          <div>
+            <div style="font-weight:600;font-size:0.9rem;margin-bottom:2px;">P2P Peer Discovery</div>
+            <div style="font-size:0.8rem;color:var(--muted);">Connect with other HashNode operators via mDNS or Nostr relay.</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="setup-nav">
+        <button class="btn btn-primary btn-lg" onclick="nextStep()">Get Started →</button>
+      </div>
+    </div>
+
+    <!-- ── Step 2: Lightning / NWC ─────────────────────────── -->
+    <div class="setup-form" id="form-2" style="display:none">
+      <h2 class="setup-form-title">Connect Lightning Wallet</h2>
+      <p class="setup-form-desc">
+        HashNode uses <strong>Nostr Wallet Connect (NWC)</strong> to create Lightning invoices
+        and verify payments. You'll need a NWC-compatible wallet on your node.
+      </p>
+
+      <div class="form-group">
+        <label class="form-label">NWC Connection String</label>
+        <input
+          class="form-input mono"
+          type="password"
+          id="nwc-string"
+          placeholder="nostr+walletconnect://..."
+          autocomplete="off"
+        >
+        <p class="form-hint">
+          Find your NWC string in
+          <a href="https://umbrel.com/apps/alby-hub" target="_blank" rel="noopener">Umbrel → Alby Hub</a>,
+          <a href="https://start9.com" target="_blank" rel="noopener">Start9</a>,
+          or <a href="https://www.mutinywallet.com" target="_blank" rel="noopener">Mutiny Wallet</a>.
+        </p>
+      </div>
+
+      <div id="nwc-error" class="alert alert-error" style="display:none"></div>
+      <div id="nwc-ok" class="alert alert-success" style="display:none">✓ Connection verified!</div>
+
+      <div class="setup-nav">
+        <button class="btn btn-ghost" onclick="prevStep()">← Back</button>
+        <button class="btn btn-secondary" id="btn-test-nwc" onclick="testNwc()">Test Connection</button>
+        <button class="btn btn-primary" id="btn-nwc-next" onclick="nextStep()">Next →</button>
+      </div>
+    </div>
+
+    <!-- ── Step 3: Scan for Miners ─────────────────────────── -->
+    <div class="setup-form" id="form-3" style="display:none">
+      <h2 class="setup-form-title">Find Your Miners</h2>
+      <p class="setup-form-desc">
+        Scan your local network for Bitaxe miners, or add them manually by IP address.
+      </p>
+
+      <button class="btn btn-secondary btn-block" id="btn-scan" onclick="scanMiners()" style="margin-bottom:16px;">
+        🔍 Scan Local Network
+      </button>
+
+      <div id="scan-status" style="display:none;font-size:0.82rem;color:var(--muted);margin-bottom:8px;"></div>
+
+      <!-- Scan results -->
+      <div id="scan-results" class="scan-list" style="display:none"></div>
+
+      <!-- Manual add -->
+      <div style="margin-top:20px;padding-top:16px;border-top:1px solid var(--border);">
+        <div style="font-size:0.8rem;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:12px;">
+          Add Manually
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px;">
+          <div class="form-group" style="margin:0">
+            <label class="form-label">IP Address</label>
+            <input class="form-input mono" type="text" id="manual-ip" placeholder="192.168.1.xxx">
+          </div>
+          <div class="form-group" style="margin:0">
+            <label class="form-label">Name</label>
+            <input class="form-input" type="text" id="manual-name" placeholder="Bitaxe #1">
+          </div>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Price (sats/min)</label>
+          <input class="form-input" type="number" id="manual-rate" placeholder="10" min="1" max="9999">
+        </div>
+        <button class="btn btn-ghost btn-block" onclick="addManualMiner()">+ Add Miner</button>
+        <div id="manual-error" class="alert alert-error" style="display:none;margin-top:10px;"></div>
+      </div>
+
+      <!-- Added miners preview -->
+      <div id="added-miners" style="display:none;margin-top:16px;padding-top:16px;border-top:1px solid var(--border);">
+        <div style="font-size:0.8rem;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:10px;">
+          Added (<span id="added-count">0</span>)
+        </div>
+        <div id="added-list" class="scan-list"></div>
+      </div>
+
+      <div class="setup-nav" style="margin-top:24px;">
+        <button class="btn btn-ghost" onclick="prevStep()">← Back</button>
+        <button class="btn btn-primary" onclick="nextStep()">Next →</button>
+      </div>
+    </div>
+
+    <!-- ── Step 4: Ready ───────────────────────────────────── -->
+    <div class="setup-form" id="form-4" style="display:none">
+      <div class="success-burst" style="padding:16px 0 20px;">
+        <div class="success-icon">🚀</div>
+        <h2 style="font-size:1.3rem;margin-bottom:8px;">You're all set!</h2>
+        <p style="color:var(--muted);font-size:0.875rem;line-height:1.6;">
+          HashNode is configured and ready to accept rentals.
+        </p>
+      </div>
+
+      <!-- Summary -->
+      <div style="background:var(--surface3);border-radius:var(--radius);padding:16px;margin-bottom:24px;">
+        <div style="font-size:0.72rem;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:12px;">
+          Configuration Summary
+        </div>
+        <div id="summary-content" style="font-size:0.85rem;display:flex;flex-direction:column;gap:8px;"></div>
+      </div>
+
+      <div id="complete-error" class="alert alert-error" style="display:none"></div>
+
+      <button class="btn btn-primary btn-lg btn-block" id="btn-launch" onclick="completSetup()">
+        ⛏ Launch HashNode
+      </button>
+      <p style="text-align:center;margin-top:12px;font-size:0.78rem;color:var(--muted);">
+        You can change all settings later in the Admin panel.
+      </p>
+    </div>
+
+  </div>
+</div>
+
+<script src="/js/api.js"></script>
+<script>
+// ── State ──────────────────────────────────────────────────────────────────────
+let currentStep = 1
+const totalSteps = 4
+const addedMiners = []
+const checkedIps = new Set()
+
+// ── Toast ──────────────────────────────────────────────────────────────────────
+function showToast(msg, type = 'info') {
+  const c = document.getElementById('toast-container')
+  const t = document.createElement('div')
+  t.className = `toast ${type}`
+  const icon = type === 'success' ? '✓' : type === 'error' ? '✕' : '⚡'
+  t.innerHTML = `<span>${icon}</span><span>${String(msg).replace(/</g,'&lt;')}</span>`
+  c.appendChild(t)
+  setTimeout(() => { t.classList.add('closing'); setTimeout(() => t.remove(), 300) }, 3500)
+}
+
+// ── Navigation ─────────────────────────────────────────────────────────────────
+function nextStep() {
+  if (currentStep >= totalSteps) return
+  // Validate step 2: require NWC string
+  if (currentStep === 2) {
+    const nwc = document.getElementById('nwc-string').value.trim()
+    if (!nwc) {
+      const e = document.getElementById('nwc-error')
+      e.textContent = 'Please enter your NWC connection string.'
+      e.style.display = ''
+      return
+    }
+  }
+  goToStep(currentStep + 1)
+}
+
+function prevStep() {
+  if (currentStep <= 1) return
+  goToStep(currentStep - 1)
+}
+
+function goToStep(n) {
+  // Hide current
+  document.getElementById(`form-${currentStep}`).style.display = 'none'
+  currentStep = n
+  // Show new
+  document.getElementById(`form-${currentStep}`).style.display = ''
+  // Update step indicator
+  for (let i = 1; i <= totalSteps; i++) {
+    const el = document.getElementById(`si-${i}`)
+    el.classList.remove('active', 'done')
+    if (i < currentStep) el.classList.add('done')
+    else if (i === currentStep) el.classList.add('active')
+  }
+  // Populate summary on step 4
+  if (currentStep === 4) renderSummary()
+  window.scrollTo(0, 0)
+}
+
+// ── Test NWC ───────────────────────────────────────────────────────────────────
+async function testNwc() {
+  const nwc = document.getElementById('nwc-string').value.trim()
+  const errEl = document.getElementById('nwc-error')
+  const okEl  = document.getElementById('nwc-ok')
+  errEl.style.display = 'none'
+  okEl.style.display  = 'none'
+
+  if (!nwc) {
+    errEl.textContent = 'Please enter your NWC connection string first.'
+    errEl.style.display = ''
+    return
+  }
+
+  const btn = document.getElementById('btn-test-nwc')
+  btn.disabled = true
+  btn.textContent = 'Testing…'
+
+  try {
+    await api.post('/api/setup/init', { nwc_string: nwc })
+    okEl.style.display = ''
+    showToast('Lightning connection verified!', 'success')
+  } catch (e) {
+    errEl.textContent = e.message
+    errEl.style.display = ''
+    showToast(e.message, 'error')
+  } finally {
+    btn.disabled = false
+    btn.textContent = 'Test Connection'
+  }
+}
+
+// ── Scan Miners ────────────────────────────────────────────────────────────────
+async function scanMiners() {
+  const btn = document.getElementById('btn-scan')
+  const status = document.getElementById('scan-status')
+  const resultsEl = document.getElementById('scan-results')
+
+  btn.disabled = true
+  btn.textContent = '🔍 Scanning…'
+  status.textContent = 'Scanning 192.168.x.x for Bitaxe API…'
+  status.style.display = ''
+  resultsEl.style.display = 'none'
+  resultsEl.innerHTML = ''
+
+  try {
+    const { miners } = await api.post('/api/setup/scan', {})
+    if (!miners || miners.length === 0) {
+      status.textContent = 'No miners found on local network.'
+      showToast('No miners found. Try adding manually.', 'info')
+    } else {
+      status.textContent = `Found ${miners.length} miner${miners.length > 1 ? 's' : ''}.`
+      resultsEl.innerHTML = miners.map(m => `
+        <div class="scan-item" id="scan-${escHtml(m.ip)}">
+          <div>
+            <div class="scan-item-ip">${escHtml(m.ip)}</div>
+            <div class="scan-item-name">${escHtml(m.name || 'Bitaxe')} · ${escHtml(m.hashrate || '—')} TH/s</div>
+          </div>
+          <div style="margin-left:auto;display:flex;align-items:center;gap:8px;">
+            <span class="badge badge-available">Found</span>
+            <div class="scan-check" id="chk-${escHtml(m.ip)}" onclick="toggleMiner('${escHtml(m.ip)}','${escHtml(m.name||'Bitaxe')}')"></div>
+          </div>
+        </div>
+      `).join('')
+      resultsEl.style.display = ''
+      showToast(`Found ${miners.length} miner(s)!`, 'success')
+    }
+  } catch (e) {
+    status.textContent = 'Scan failed: ' + e.message
+    showToast('Scan failed: ' + e.message, 'error')
+  } finally {
+    btn.disabled = false
+    btn.textContent = '🔍 Scan Again'
+  }
+}
+
+async function toggleMiner(ip, name) {
+  const chk = document.getElementById(`chk-${ip}`)
+  if (checkedIps.has(ip)) {
+    checkedIps.delete(ip)
+    chk.classList.remove('checked')
+  } else {
+    checkedIps.add(ip)
+    chk.classList.add('checked')
+    await addMiner(ip, name)
+  }
+}
+
+async function addMiner(ip, name) {
+  try {
+    await api.post('/api/setup/add-miner', { ip, name: name || 'Bitaxe', sats_per_minute: 10 })
+    if (!addedMiners.find(m => m.ip === ip)) {
+      addedMiners.push({ ip, name: name || 'Bitaxe', sats_per_minute: 10 })
+      refreshAddedList()
+    }
+    showToast(`Added ${name || ip}`, 'success')
+  } catch (e) {
+    showToast('Failed to add miner: ' + e.message, 'error')
+  }
+}
+
+function addManualMiner() {
+  const ip   = document.getElementById('manual-ip').value.trim()
+  const name = document.getElementById('manual-name').value.trim() || 'Bitaxe'
+  const rate = parseInt(document.getElementById('manual-rate').value) || 10
+  const errEl = document.getElementById('manual-error')
+  errEl.style.display = 'none'
+
+  if (!ip || !/^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(ip)) {
+    errEl.textContent = 'Please enter a valid IP address (e.g. 192.168.1.100).'
+    errEl.style.display = ''
+    return
+  }
+  if (addedMiners.find(m => m.ip === ip)) {
+    errEl.textContent = 'This IP has already been added.'
+    errEl.style.display = ''
+    return
+  }
+
+  api.post('/api/setup/add-miner', { ip, name, sats_per_minute: rate })
+    .then(() => {
+      addedMiners.push({ ip, name, sats_per_minute: rate })
+      refreshAddedList()
+      document.getElementById('manual-ip').value   = ''
+      document.getElementById('manual-name').value = ''
+      document.getElementById('manual-rate').value = ''
+      showToast(`Added ${name} (${ip})`, 'success')
+    })
+    .catch(e => {
+      errEl.textContent = e.message
+      errEl.style.display = ''
+    })
+}
+
+function refreshAddedList() {
+  const wrap = document.getElementById('added-miners')
+  const list = document.getElementById('added-list')
+  const count = document.getElementById('added-count')
+  count.textContent = addedMiners.length
+  if (addedMiners.length === 0) { wrap.style.display = 'none'; return }
+  wrap.style.display = ''
+  list.innerHTML = addedMiners.map(m => `
+    <div class="scan-item">
+      <div style="flex:1">
+        <div class="scan-item-ip">${escHtml(m.ip)}</div>
+        <div class="scan-item-name">${escHtml(m.name)} · ${m.sats_per_minute} sats/min</div>
+      </div>
+      <span class="badge badge-active">Added</span>
+    </div>
+  `).join('')
+}
+
+// ── Summary ────────────────────────────────────────────────────────────────────
+function renderSummary() {
+  const nwc = document.getElementById('nwc-string').value.trim()
+  const nwcShort = nwc ? nwc.slice(0, 30) + '…' : 'Not configured'
+  document.getElementById('summary-content').innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center;">
+      <span style="color:var(--muted);">Lightning (NWC)</span>
+      <span style="font-family:var(--font-mono);font-size:0.78rem;">${escHtml(nwcShort)}</span>
+    </div>
+    <div style="display:flex;justify-content:space-between;align-items:center;">
+      <span style="color:var(--muted);">Miners added</span>
+      <span style="font-weight:700;color:var(--btc);">${addedMiners.length}</span>
+    </div>
+    ${addedMiners.map(m => `
+      <div style="display:flex;justify-content:space-between;padding-left:12px;font-size:0.8rem;">
+        <span style="color:var(--muted);">⛏ ${escHtml(m.name)}</span>
+        <span style="font-family:var(--font-mono);">${escHtml(m.ip)}</span>
+      </div>
+    `).join('')}
+  `
+}
+
+// ── Complete Setup ─────────────────────────────────────────────────────────────
+async function completSetup() {
+  const btn = document.getElementById('btn-launch')
+  const errEl = document.getElementById('complete-error')
+  errEl.style.display = 'none'
+  btn.disabled = true
+  btn.textContent = 'Setting up…'
+
+  try {
+    await api.post('/api/setup/complete', {})
+    showToast('HashNode is ready!', 'success')
+    setTimeout(() => { window.location.href = '/' }, 800)
+  } catch (e) {
+    errEl.textContent = e.message
+    errEl.style.display = ''
+    btn.disabled = false
+    btn.textContent = '⛏ Launch HashNode'
+  }
+}
+
+// ── Helpers ────────────────────────────────────────────────────────────────────
+function escHtml(str) {
+  return String(str == null ? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;')
+}
+</script>
+</body>
+</html>
