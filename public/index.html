@@ -105,25 +105,59 @@
 <div class="modal-backdrop" id="modal-login">
   <div class="modal">
     <div class="modal-header">
-      <span class="modal-title">Connect with Nostr</span>
+      <span class="modal-title">Sign In</span>
       <button class="modal-close" onclick="closeModal('modal-login')">×</button>
     </div>
-    <p style="color:var(--muted);font-size:0.875rem;margin-bottom:20px;">
-      Sign in with your Nostr identity. No email, no password — just your keys.
+    <p style="color:var(--muted);font-size:0.875rem;margin-bottom:16px;">
+      No account needed — sign in with your Bitcoin/Lightning identity.
     </p>
-    <div id="login-error" class="alert alert-error" style="display:none"></div>
-    <div class="wallet-opts">
-      <div class="wallet-opt" id="opt-extension">
-        <span class="wallet-opt-icon">🦎</span>
-        <div>
-          <div>Browser Extension</div>
-          <div class="wallet-opt-sub">Alby, nos2x, or any NIP-07 extension</div>
+    <div id="login-error" class="alert alert-error" style="display:none;margin-bottom:12px;"></div>
+
+    <!-- Default: choose method -->
+    <div id="login-methods">
+      <div class="wallet-opts">
+        <div class="wallet-opt" id="opt-lnauth" onclick="doLoginLnauth()">
+          <span class="wallet-opt-icon">⚡</span>
+          <div>
+            <div>Lightning Wallet <span style="background:var(--btc);color:#000;font-size:0.65rem;font-weight:700;padding:1px 5px;border-radius:3px;margin-left:4px;vertical-align:middle;">RECOMMENDED</span></div>
+            <div class="wallet-opt-sub">Alby, Phoenix, Breez, Zeus — any LNURL-auth wallet</div>
+          </div>
+        </div>
+        <div class="wallet-opt" id="opt-extension" onclick="doLogin()">
+          <span class="wallet-opt-icon">🦎</span>
+          <div>
+            <div>Nostr Extension</div>
+            <div class="wallet-opt-sub">Alby or nos2x browser extension (NIP-07)</div>
+          </div>
         </div>
       </div>
     </div>
-    <p style="margin-top:16px;font-size:0.78rem;color:var(--dim);text-align:center;">
-      No extension? Install <a href="https://getalby.com" target="_blank">Alby</a> — free &amp; open source.
-    </p>
+
+    <!-- LNAUTH flow panel -->
+    <div id="login-lnauth" style="display:none;">
+      <div id="ln-waiting" style="display:flex;align-items:center;gap:10px;padding:12px 0;">
+        <div class="spinner" style="width:16px;height:16px;border-width:2px;flex-shrink:0;"></div>
+        <span style="font-size:0.85rem;color:var(--muted);">Generating challenge…</span>
+      </div>
+      <div id="ln-ready" style="display:none;">
+        <p style="font-size:0.82rem;color:var(--muted);margin-bottom:12px;">
+          Open in your Lightning wallet to approve login:
+        </p>
+        <button class="btn btn-primary btn-block btn-lg" id="btn-ln-open" onclick="openLnauthWallet()" style="margin-bottom:10px;">
+          ⚡ Open in Lightning Wallet
+        </button>
+        <details>
+          <summary style="font-size:0.75rem;color:var(--muted);cursor:pointer;">Copy LNURL manually</summary>
+          <div id="ln-lnurl-text" style="margin-top:6px;padding:8px;background:var(--surface3);border-radius:var(--radius);font-family:var(--font-mono);font-size:0.68rem;word-break:break-all;color:var(--muted);cursor:pointer;" onclick="copyLnurl(this)"></div>
+          <div style="font-size:0.72rem;color:var(--dim);margin-top:4px;">Click LNURL to copy</div>
+        </details>
+        <div style="display:flex;align-items:center;gap:8px;margin-top:14px;font-size:0.8rem;color:var(--muted);">
+          <div class="spinner" style="width:12px;height:12px;border-width:2px;flex-shrink:0;"></div>
+          Waiting for wallet confirmation…
+        </div>
+      </div>
+      <button class="btn btn-ghost btn-sm" style="margin-top:8px;width:100%;" onclick="showLoginMethods()">← Back</button>
+    </div>
   </div>
 </div>
 
@@ -273,7 +307,10 @@ function showToast(msg, type = 'info') {
 
 // ── Onboarding ─────────────────────────────────────────────────────────────────
 function checkOnboarding() {
-  if (!window.nostr) document.getElementById('onboarding-banner').style.display = ''
+  // Show banner only if not logged in AND no Nostr extension (LNAUTH doesn't need one)
+  if (!Auth.isLoggedIn() && !window.nostr) {
+    document.getElementById('onboarding-banner').style.display = ''
+  }
 }
 
 // ── Nav ────────────────────────────────────────────────────────────────────────
@@ -477,31 +514,83 @@ function closeSheet() {
 function openModal(id)  { document.getElementById(id).classList.add('open') }
 function closeModal(id) { document.getElementById(id).classList.remove('open') }
 
-// ── Login ──────────────────────────────────────────────────────────────────────
+// ── Login helpers ──────────────────────────────────────────────────────────────
+function showLoginMethods() {
+  document.getElementById('login-methods').style.display = ''
+  document.getElementById('login-lnauth').style.display  = 'none'
+  document.getElementById('login-error').style.display   = 'none'
+}
+
+function _onLoginSuccess(user) {
+  closeModal('modal-login')
+  showLoginMethods() // reset for next time
+  updateNav()
+  showToast('Connected!', 'success')
+  if (selectedMiner) {
+    selectedMins = minerDurations[selectedMiner.id] || 60
+    document.getElementById('sheet-miner-name').textContent = 'Rent ' + selectedMiner.name
+    document.getElementById('sheet-miner-sub').textContent  = `${selectedMiner.hashrate_ths} TH/s · ${selectedMiner.sats_per_minute} sats/min`
+    document.querySelectorAll('#dur-grid .dur-chip').forEach(c => {
+      c.classList.toggle('sel', parseInt(c.dataset.mins) === selectedMins)
+    })
+    updatePriceSummary()
+    goSheetStep(1)
+    openSheet()
+  }
+}
+
+// ── LNAUTH login ───────────────────────────────────────────────────────────────
+async function doLoginLnauth() {
+  const errEl = document.getElementById('login-error')
+  errEl.style.display = 'none'
+  document.getElementById('login-methods').style.display = 'none'
+  document.getElementById('login-lnauth').style.display  = ''
+  document.getElementById('ln-waiting').style.display    = 'flex'
+  document.getElementById('ln-ready').style.display      = 'none'
+
+  try {
+    const { k1, lnurl } = await Auth.startLnauth()
+    document.getElementById('btn-ln-open').dataset.lnurl  = lnurl
+    document.getElementById('ln-lnurl-text').textContent  = lnurl
+    document.getElementById('ln-waiting').style.display   = 'none'
+    document.getElementById('ln-ready').style.display     = ''
+
+    const user = await Auth.waitLnauth(k1)
+    _onLoginSuccess(user)
+  } catch (e) {
+    document.getElementById('login-lnauth').style.display = 'none'
+    document.getElementById('login-methods').style.display = ''
+    errEl.textContent   = e.message
+    errEl.style.display = ''
+  }
+}
+
+function openLnauthWallet() {
+  const lnurl = document.getElementById('btn-ln-open').dataset.lnurl
+  if (lnurl) window.open('lightning:' + lnurl, '_self')
+}
+
+function copyLnurl(el) {
+  navigator.clipboard.writeText(el.textContent).then(() => {
+    const orig = el.style.color
+    el.style.color = 'var(--green)'
+    setTimeout(() => { el.style.color = orig }, 1500)
+  })
+}
+
+// ── NIP-07 login ───────────────────────────────────────────────────────────────
 async function doLogin() {
   const errEl = document.getElementById('login-error')
   errEl.style.display = 'none'
   try {
     const user = await Auth.login()
-    closeModal('modal-login')
-    updateNav()
-    showToast('Connected!', 'success')
-    if (selectedMiner) {
-      selectedMins = minerDurations[selectedMiner.id] || 60
-      document.getElementById('sheet-miner-name').textContent = 'Rent ' + selectedMiner.name
-      document.getElementById('sheet-miner-sub').textContent  = `${selectedMiner.hashrate_ths} TH/s · ${selectedMiner.sats_per_minute} sats/min`
-      document.querySelectorAll('#dur-grid .dur-chip').forEach(c => {
-        c.classList.toggle('sel', parseInt(c.dataset.mins) === selectedMins)
-      })
-      updatePriceSummary()
-      goSheetStep(1)
-      openSheet()
-    }
+    _onLoginSuccess(user)
   } catch (e) {
-    errEl.textContent = e.message
+    errEl.textContent   = e.message
     errEl.style.display = ''
   }
 }
+
 
 // ── Create Rental ──────────────────────────────────────────────────────────────
 async function createRental() {
@@ -575,8 +664,9 @@ async function pollPayment() {
 
 // ── Bind events ────────────────────────────────────────────────────────────────
 function bindEvents() {
-  document.getElementById('btn-login').onclick      = () => openModal('modal-login')
-  document.getElementById('opt-extension').onclick  = doLogin
+  document.getElementById('btn-login').onclick     = () => { showLoginMethods(); openModal('modal-login') }
+  document.getElementById('opt-lnauth').onclick    = doLoginLnauth
+  document.getElementById('opt-extension').onclick = doLogin
 
   // Sheet backdrop → close
   document.getElementById('sheet-rent').addEventListener('click', e => {

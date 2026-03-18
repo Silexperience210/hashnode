@@ -12,6 +12,39 @@ import crypto from 'crypto'
 import { getDb, getConfig } from '../lib/db.js'
 import { isValidPubkey, verifyAuthEvent } from '../lib/nostr-auth.js'
 import { sign, verify, fromHeader } from '../lib/jwt.js'
+import { secp256k1 } from '@noble/curves/secp256k1'
+
+// ── Minimal bech32 encoder (for LNURL — no external dep needed) ────────────────
+const B32_CHARSET = 'qpzry9x8gf2tvdw0s3jn54khce6mua7l'
+const B32_GEN     = [0x3b6a57b2, 0x26508e6d, 0x1ea119fa, 0x3d4233dd, 0x2a1462b3]
+function _b32Polymod(v) {
+  let c = 1
+  for (const x of v) { const t = c >> 25; c = ((c & 0x1ffffff) << 5) ^ x; for (let i = 0; i < 5; i++) if ((t >> i) & 1) c ^= B32_GEN[i] }
+  return c
+}
+function _b32HrpExpand(hrp) {
+  const r = [...hrp].map(c => c.charCodeAt(0) >> 5)
+  r.push(0)
+  return r.concat([...hrp].map(c => c.charCodeAt(0) & 31))
+}
+function _b32ConvertBits(data, from, to) {
+  let acc = 0, bits = 0
+  const ret = [], maxv = (1 << to) - 1
+  for (const v of data) { acc = (acc << from) | v; bits += from; while (bits >= to) { bits -= to; ret.push((acc >> bits) & maxv) } }
+  if (bits > 0) ret.push((acc << (to - bits)) & maxv)
+  return ret
+}
+function toLnurl(url) {
+  const hrp = 'lnurl'
+  const data = _b32ConvertBits(Buffer.from(url, 'utf8'), 8, 5)
+  const chkIn = [..._b32HrpExpand(hrp), ...data, 0, 0, 0, 0, 0, 0]
+  const mod = _b32Polymod(chkIn) ^ 1
+  const checksum = [5,4,3,2,1,0].map(p => (mod >> (5 * p)) & 31)
+  return (hrp + '1' + [...data, ...checksum].map(d => B32_CHARSET[d]).join('')).toUpperCase()
+}
+
+// ── LNURL-auth in-memory sessions: k1 → { key: null|string, created: ms } ─────
+const lnauthSessions = new Map()
 
 const router = Router()
 
@@ -41,6 +74,121 @@ function clientIp(req) {
   const forwarded = req.headers['x-forwarded-for']
   if (forwarded) return forwarded.split(',')[0].trim()
   return req.socket?.remoteAddress || req.ip || 'unknown'
+}
+
+// ── GET /lnauth/start ─────────────────────────────────────────────────────────
+// Returns { k1, lnurl } — browser opens lnurl in Lightning wallet
+router.get('/lnauth/start', (req, res) => {
+  try {
+    const k1 = crypto.randomBytes(32).toString('hex')
+
+    // Build callback URL (use Cloudflare URL if available, else request host)
+    const cfUrl = getConfig('cloudflare_url') || ''
+    let base
+    if (cfUrl) {
+      base = cfUrl.replace(/\/$/, '')
+    } else {
+      const proto = req.headers['x-forwarded-proto'] || 'http'
+      const host  = req.headers['x-forwarded-host']  || req.headers.host
+      base = `${proto}://${host}`
+    }
+    const callbackUrl = `${base}/api/auth/lnauth/callback?tag=login&k1=${k1}&action=login`
+    const lnurl = toLnurl(callbackUrl)
+
+    // Purge stale sessions (> 10 min old)
+    for (const [k, v] of lnauthSessions) {
+      if (Date.now() - v.created > 10 * 60 * 1000) lnauthSessions.delete(k)
+    }
+    lnauthSessions.set(k1, { key: null, created: Date.now() })
+
+    return res.json({ k1, lnurl })
+  } catch (err) {
+    console.error('[auth/lnauth/start] error:', err)
+    return res.status(500).json({ error: 'Internal server error' })
+  }
+})
+
+// ── GET /lnauth/callback ──────────────────────────────────────────────────────
+// Called by Lightning wallet after user approves login
+router.get('/lnauth/callback', (req, res) => {
+  res.setHeader('Content-Type', 'application/json')
+  try {
+    const { k1, sig, key } = req.query
+    if (!k1 || !sig || !key) return res.json({ status: 'ERROR', reason: 'Missing parameters' })
+
+    const session = lnauthSessions.get(k1)
+    if (!session) return res.json({ status: 'ERROR', reason: 'Unknown or expired challenge' })
+
+    // Verify secp256k1 DER signature: sig(k1_bytes) with compressed pubkey
+    const msgBytes = Buffer.from(k1, 'hex')
+    const sigObj   = secp256k1.Signature.fromDER(sig)
+    const valid    = secp256k1.verify(sigObj, msgBytes, key)
+    if (!valid) return res.json({ status: 'ERROR', reason: 'Invalid signature' })
+
+    session.key = key
+    return res.json({ status: 'OK' })
+  } catch (err) {
+    console.error('[auth/lnauth/callback] error:', err)
+    return res.json({ status: 'ERROR', reason: 'Verification error: ' + err.message })
+  }
+})
+
+// ── GET /lnauth/poll/:k1 ──────────────────────────────────────────────────────
+// SSE stream — browser waits here until wallet confirms
+router.get('/lnauth/poll/:k1', (req, res) => {
+  res.setHeader('Content-Type', 'text/event-stream')
+  res.setHeader('Cache-Control', 'no-cache')
+  res.setHeader('Connection', 'keep-alive')
+  res.flushHeaders()
+
+  const k1      = req.params.k1
+  const session = lnauthSessions.get(k1)
+  if (!session) {
+    res.write(`data: ${JSON.stringify({ error: 'unknown_k1' })}\n\n`)
+    return res.end()
+  }
+
+  if (session.key) { _finishLnauth(k1, session.key, res); return }
+
+  let attempts = 0
+  const timer = setInterval(() => {
+    const s = lnauthSessions.get(k1)
+    if (s?.key) { clearInterval(timer); _finishLnauth(k1, s.key, res) }
+    else if (++attempts >= 150) {
+      clearInterval(timer)
+      res.write(`data: ${JSON.stringify({ error: 'timeout' })}\n\n`)
+      res.end()
+    }
+  }, 2000)
+
+  req.on('close', () => clearInterval(timer))
+})
+
+function _finishLnauth(k1, rawKey, res) {
+  lnauthSessions.delete(k1)
+
+  // LNAUTH key = 33-byte compressed pubkey (66 hex). Strip parity prefix for storage.
+  const pubkey = rawKey.length === 66 ? rawKey.slice(2) : rawKey
+
+  const db          = getDb()
+  const ownerPubkey = getConfig('owner_pubkey') || ''
+  const adminList   = (getConfig('admin_pubkeys') || '').split(',').map(s => s.trim()).filter(Boolean)
+  const isAdmin     = pubkey === ownerPubkey || adminList.includes(pubkey) ? 1 : 0
+
+  db.prepare(
+    `INSERT INTO users (pubkey_nostr, is_admin) VALUES (?, ?)
+     ON CONFLICT(pubkey_nostr) DO UPDATE SET is_admin = excluded.is_admin`
+  ).run(pubkey, isAdmin)
+
+  const user  = db.prepare('SELECT * FROM users WHERE pubkey_nostr = ?').get(pubkey)
+  const token = sign({ sub: user.id, pubkey: user.pubkey_nostr, is_admin: user.is_admin === 1 })
+
+  res.write(`data: ${JSON.stringify({
+    token,
+    pubkey,
+    user: { id: user.id, pubkey, is_admin: user.is_admin === 1 },
+  })}\n\n`)
+  res.end()
 }
 
 // ── POST /challenge ───────────────────────────────────────────────────────────

@@ -48,10 +48,47 @@ window.Auth = (() => {
       localStorage.removeItem(CONFIG.USER_KEY)
     },
 
+    // ── LNURL-auth ─────────────────────────────────────────────────────────────
+
+    /** Request a new LNAUTH challenge. Returns { k1, lnurl }. */
+    async startLnauth() {
+      return api.get('/api/auth/lnauth/start')
+    },
+
+    /**
+     * Open an SSE stream and resolve when the Lightning wallet confirms login.
+     * @param {string} k1  challenge from startLnauth()
+     * @returns {Promise<user>}
+     */
+    waitLnauth(k1) {
+      return new Promise((resolve, reject) => {
+        const es = new EventSource(`/api/auth/lnauth/poll/${encodeURIComponent(k1)}`)
+        const hard = setTimeout(() => {
+          es.close()
+          reject(new Error('LNAUTH timed out — please try again.'))
+        }, 5 * 60 * 1000)
+
+        es.onmessage = (e) => {
+          clearTimeout(hard)
+          es.close()
+          try {
+            const data = JSON.parse(e.data)
+            if (data.error) return reject(new Error(data.error === 'timeout' ? 'Login timed out.' : data.error))
+            this.setSession(data.token, data.user)
+            resolve(data.user)
+          } catch { reject(new Error('Unexpected server response.')) }
+        }
+        es.onerror = () => { clearTimeout(hard); es.close(); reject(new Error('Connection lost.')) }
+      })
+    },
+
+    // ── NIP-07 login ───────────────────────────────────────────────────────────
+
     async login() {
       if (!window.nostr) {
         throw new Error(
-          'No Nostr extension found. Install Alby (getalby.com) or nos2x to continue.'
+          'Nostr extension not detected. If you just installed Alby, ' +
+          'please refresh this page and try again.'
         )
       }
 

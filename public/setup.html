@@ -93,14 +93,53 @@
 
       <!-- Nostr identity -->
       <div class="form-group">
-        <label class="form-label">Node Admin (Nostr Identity)</label>
+        <label class="form-label">Node Admin Identity</label>
         <div style="display:flex;gap:8px;align-items:center;">
-          <input class="form-input mono" type="text" id="owner-pubkey" placeholder="npub… or hex pubkey (64 chars)" autocomplete="off" style="flex:1">
-          <button class="btn btn-ghost btn-sm" id="btn-get-pubkey" onclick="getNostrPubkey()">
-            Use Extension
+          <input class="form-input mono" type="text" id="owner-pubkey" placeholder="64-char hex pubkey" autocomplete="off" style="flex:1">
+          <button class="btn btn-ghost btn-sm" id="btn-get-pubkey" onclick="getNostrPubkey()" title="Auto-fill with Nostr extension (Alby, nos2x)">
+            Nostr
+          </button>
+          <button class="btn btn-secondary btn-sm" id="btn-lnauth" onclick="startOwnerLnauth()" title="Sign in with Lightning wallet (LNURL-auth)">
+            ⚡ Lightning
           </button>
         </div>
-        <p class="form-hint">Your Nostr public key — grants you admin access. Install <a href="https://getalby.com" target="_blank" rel="noopener">Alby</a> or <a href="https://github.com/fiatjaf/nos2x" target="_blank" rel="noopener">nos2x</a> to auto-fill.</p>
+        <p class="form-hint" id="pubkey-hint">
+          Choose how to prove your identity:
+          <strong>Nostr</strong> = browser extension (<a href="https://getalby.com" target="_blank" rel="noopener">Alby</a> / nos2x) ·
+          <strong>⚡ Lightning</strong> = any Lightning wallet (recommended)
+        </p>
+      </div>
+
+      <!-- LNAUTH panel (hidden by default) -->
+      <div id="lnauth-panel" style="display:none;margin-bottom:16px;">
+        <div style="background:var(--surface3);border-radius:var(--radius);border:1px solid var(--border);padding:14px;">
+          <div style="font-weight:600;font-size:0.82rem;margin-bottom:10px;">⚡ Sign with Lightning Wallet</div>
+          <div id="lnauth-waiting" style="display:flex;align-items:center;gap:10px;">
+            <div class="spinner" style="width:14px;height:14px;border-width:2px;flex-shrink:0;"></div>
+            <span style="font-size:0.82rem;color:var(--muted);">Generating challenge…</span>
+          </div>
+          <div id="lnauth-ready" style="display:none;">
+            <div style="font-size:0.78rem;color:var(--muted);margin-bottom:10px;">
+              Open this in your Lightning wallet (Alby, Phoenix, Breez…):
+            </div>
+            <button class="btn btn-primary btn-block" id="btn-open-alby" onclick="openLnauthInAlby()" style="margin-bottom:8px;">
+              ⚡ Open in Alby / Lightning Wallet
+            </button>
+            <details style="margin-top:8px;">
+              <summary style="font-size:0.75rem;color:var(--muted);cursor:pointer;">Show LNURL to copy</summary>
+              <div id="lnurl-text" style="margin-top:6px;padding:8px;background:var(--bg);border-radius:var(--radius);font-family:var(--font-mono);font-size:0.7rem;word-break:break-all;color:var(--muted);"></div>
+            </details>
+            <div style="display:flex;align-items:center;gap:8px;margin-top:10px;font-size:0.78rem;color:var(--muted);">
+              <div class="spinner" style="width:12px;height:12px;border-width:2px;flex-shrink:0;"></div>
+              <span>Waiting for wallet confirmation…</span>
+            </div>
+          </div>
+          <div id="lnauth-success" style="display:none;align-items:center;gap:8px;color:var(--green);font-size:0.82rem;font-weight:600;">
+            ✓ Identity confirmed via Lightning!
+          </div>
+          <div id="lnauth-error" class="alert alert-error" style="display:none;margin-top:8px;"></div>
+          <button class="btn btn-ghost btn-sm" style="margin-top:8px;" onclick="cancelLnauth()">Cancel</button>
+        </div>
       </div>
 
       <!-- Node name (optional) -->
@@ -481,13 +520,82 @@ async function saveCfToken() {
   }
 }
 
+// ── LNAUTH for owner pubkey ────────────────────────────────────────────────────
+let _lnauthK1 = null
+
+async function startOwnerLnauth() {
+  const panel    = document.getElementById('lnauth-panel')
+  const waiting  = document.getElementById('lnauth-waiting')
+  const ready    = document.getElementById('lnauth-ready')
+  const success  = document.getElementById('lnauth-success')
+  const errEl    = document.getElementById('lnauth-error')
+
+  panel.style.display  = ''
+  waiting.style.display = 'flex'
+  ready.style.display   = 'none'
+  success.style.display = 'none'
+  errEl.style.display   = 'none'
+
+  try {
+    const { k1, lnurl } = await api.get('/api/auth/lnauth/start')
+    _lnauthK1 = k1
+    document.getElementById('lnurl-text').textContent = lnurl
+    document.getElementById('btn-open-alby').dataset.lnurl = lnurl
+    waiting.style.display = 'none'
+    ready.style.display   = ''
+
+    // Poll until wallet confirms
+    const es = new EventSource(`/api/auth/lnauth/poll/${encodeURIComponent(k1)}`)
+    es.onmessage = (e) => {
+      es.close()
+      try {
+        const data = JSON.parse(e.data)
+        if (data.error) {
+          errEl.textContent   = data.error === 'timeout' ? 'Timed out — please try again.' : data.error
+          errEl.style.display = ''
+          ready.style.display = 'none'
+          return
+        }
+        // Auto-fill pubkey + show success
+        document.getElementById('owner-pubkey').value = data.pubkey
+        ready.style.display   = 'none'
+        success.style.display = 'flex'
+        showToast('Identity confirmed via Lightning!', 'success')
+      } catch {
+        errEl.textContent   = 'Unexpected response from server.'
+        errEl.style.display = ''
+      }
+    }
+    es.onerror = () => {
+      es.close()
+      errEl.textContent   = 'Connection lost. Please try again.'
+      errEl.style.display = ''
+      ready.style.display = 'none'
+    }
+  } catch (e) {
+    errEl.textContent   = e.message
+    errEl.style.display = ''
+    waiting.style.display = 'none'
+  }
+}
+
+function openLnauthInAlby() {
+  const lnurl = document.getElementById('btn-open-alby').dataset.lnurl
+  if (lnurl) window.open('lightning:' + lnurl, '_self')
+}
+
+function cancelLnauth() {
+  document.getElementById('lnauth-panel').style.display = 'none'
+  _lnauthK1 = null
+}
+
 // ── Get Nostr pubkey from extension ────────────────────────────────────────────
 async function getNostrPubkey() {
   const btn = document.getElementById('btn-get-pubkey')
   const errEl = document.getElementById('nwc-error')
   errEl.style.display = 'none'
   if (!window.nostr) {
-    errEl.textContent = 'No Nostr extension found. Install Alby or nos2x, or paste your pubkey manually.'
+    errEl.textContent = 'Nostr extension not detected. If you just installed Alby, please refresh this page and try again. Or use ⚡ Lightning instead.'
     errEl.style.display = ''
     return
   }
