@@ -22,7 +22,8 @@ router.post('/', requireAuth, async (req, res) => {
     if (!miner_id)         return res.status(400).json({ error: 'miner_id is required' })
     if (!duration_minutes) return res.status(400).json({ error: 'duration_minutes is required' })
     if (!payout_address)   return res.status(400).json({ error: 'payout_address is required' })
-    if (!pool_url)         return res.status(400).json({ error: 'pool_url is required' })
+    // pool_url is optional — fall back to public-pool.io if omitted
+    const resolvedPool = pool_url || 'stratum+tcp://public-pool.io:21496'
 
     const mins = parseInt(duration_minutes, 10)
     if (!Number.isFinite(mins) || mins < 1 || mins > 1440) {
@@ -66,7 +67,7 @@ router.post('/', requireAuth, async (req, res) => {
     const endTime          = new Date(now.getTime() + mins * 60 * 1000).toISOString()
 
     const meta = JSON.stringify({
-      pool_url,
+      pool_url:     resolvedPool,
       payout_address,
       stratum_user: `${payout_address}.hashnode`,
     })
@@ -135,7 +136,7 @@ router.get('/status/:id', requireAuth, async (req, res) => {
             // Fire-and-forget: push new pool config to the Bitaxe
             const meta = safeJson(rental.metadata)
             configureBitaxe(rental.ip_address, rental.port, {
-              pool_url:    stripStratumPrefix(meta.pool_url || ''),
+              pool_url:    stripStratumPrefix(meta.pool_url || 'public-pool.io:21496'),
               pool_port:   meta.pool_port || 3333,
               stratum_user: meta.stratum_user || meta.payout_address,
             }).then((ok) => {

@@ -165,8 +165,8 @@ function renderActive(rentals) {
   document.getElementById('live-indicator').style.display = ''
 
   grid.innerHTML = rentals.map(r => {
-    const endTs     = new Date(r.ends_at).getTime()
-    const startTs   = new Date(r.started_at).getTime()
+    const endTs     = new Date(r.end_time).getTime()
+    const startTs   = new Date(r.start_time).getTime()
     const totalMs   = endTs - startTs
     const pct       = Math.min(100, Math.max(0, Math.round((Date.now() - startTs) / totalMs * 100)))
 
@@ -183,15 +183,15 @@ function renderActive(rentals) {
       <div class="live-stats" id="ls-${esc(r.id)}">
         <div class="live-stat">
           <div class="live-stat-label">Hashrate</div>
-          <div class="live-stat-val btc" id="hs-${esc(r.id)}">${esc(r.live?.hashrate_ths || '—')} TH/s</div>
+          <div class="live-stat-val btc" id="hs-${esc(r.id)}">${r.last_hashrate != null ? r.last_hashrate + ' TH/s' : '—'}</div>
         </div>
         <div class="live-stat">
           <div class="live-stat-label">Temp</div>
-          <div class="live-stat-val ${(r.live?.temp || 0) > 70 ? 'red' : (r.live?.temp || 0) > 60 ? 'yellow' : 'green'}" id="tmp-${esc(r.id)}">${r.live?.temp ? r.live.temp + '°C' : '—'}</div>
+          <div class="live-stat-val ${(r.last_temp_c || 0) > 70 ? 'red' : (r.last_temp_c || 0) > 60 ? 'yellow' : 'green'}" id="tmp-${esc(r.id)}">${r.last_temp_c != null ? r.last_temp_c + '°C' : '—'}</div>
         </div>
         <div class="live-stat">
           <div class="live-stat-label">Power</div>
-          <div class="live-stat-val" id="pwr-${esc(r.id)}">${r.live?.power_w ? r.live.power_w + 'W' : '—'}</div>
+          <div class="live-stat-val" id="pwr-${esc(r.id)}">${r.last_power_w != null ? r.last_power_w + 'W' : '—'}</div>
         </div>
       </div>
 
@@ -220,7 +220,7 @@ function renderActive(rentals) {
         </div>
         <div class="mc-row">
           <span class="mc-key">Paid</span>
-          <span class="mc-val btc">${(r.amount_sats || 0).toLocaleString()} sats</span>
+          <span class="mc-val btc">${(r.total_sats || 0).toLocaleString()} sats</span>
         </div>
       </div>
     </div>`
@@ -228,8 +228,8 @@ function renderActive(rentals) {
 
   // Start countdown timers
   rentals.forEach(r => {
-    const endTs = new Date(r.ends_at).getTime()
-    const startTs = new Date(r.started_at).getTime()
+    const endTs = new Date(r.end_time).getTime()
+    const startTs = new Date(r.start_time).getTime()
     const totalMs = endTs - startTs
 
     liveTimers[r.id] = setInterval(() => {
@@ -256,11 +256,14 @@ function renderActive(rentals) {
 async function loadDashboard() {
   if (!Auth.requireAuth()) return
   try {
-    const { rentals } = await api.get('/api/rentals/active')
-    activeRentals = rentals || []
+    // /api/rentals/my returns all user rentals — filter by status
+    const { rentals } = await api.get('/api/rentals/my')
+    const all = rentals || []
+    activeRentals = all.filter(r => r.status === 'active')
     renderActive(activeRentals)
+    renderHistory(all.filter(r => r.status !== 'active'))
   } catch (e) {
-    showToast('Failed to load active rentals: ' + e.message, 'error')
+    showToast('Failed to load rentals: ' + e.message, 'error')
     document.getElementById('active-grid').innerHTML =
       `<div class="empty" style="grid-column:1/-1">
         <div class="empty-icon">⚠️</div>
@@ -270,52 +273,46 @@ async function loadDashboard() {
   }
 }
 
-async function loadHistory() {
-  try {
-    const { rentals } = await api.get('/api/rentals/history')
-    const body = document.getElementById('history-body')
-    if (!rentals || !rentals.length) {
-      body.innerHTML = `<tr><td colspan="7" style="text-align:center;color:var(--muted);padding:32px;">No rental history yet.</td></tr>`
-      return
-    }
-    body.innerHTML = rentals.map(r => {
-      const statusBadge = r.status === 'active'
-        ? `<span class="badge badge-active">Active</span>`
-        : r.status === 'expired'
-        ? `<span class="badge badge-done">Expired</span>`
-        : `<span class="badge badge-done">${esc(r.status)}</span>`
-      const date = r.created_at ? new Date(r.created_at).toLocaleDateString() : '—'
-      return `<tr>
-        <td><strong>${esc(r.miner_name || '—')}</strong></td>
-        <td>${fmtMins(r.duration_minutes)}</td>
-        <td class="td-mono" style="font-size:0.78rem;">${esc(r.pool_url ? r.pool_url.slice(0,30) : 'Default')}</td>
-        <td class="td-mono" style="font-size:0.78rem;" title="${esc(r.payout_address)}">${esc(addrShort(r.payout_address))}</td>
-        <td class="td-btc">${(r.amount_sats || 0).toLocaleString()}</td>
-        <td>${statusBadge}</td>
-        <td style="color:var(--muted);">${date}</td>
-      </tr>`
-    }).join('')
-  } catch (e) {
-    document.getElementById('history-body').innerHTML =
-      `<tr><td colspan="7" style="text-align:center;color:var(--red);padding:20px;">${esc(e.message)}</td></tr>`
+function renderHistory(rentals) {
+  const body = document.getElementById('history-body')
+  if (!rentals || !rentals.length) {
+    body.innerHTML = `<tr><td colspan="7" style="text-align:center;color:var(--muted);padding:32px;">No rental history yet.</td></tr>`
+    return
   }
+  body.innerHTML = rentals.map(r => {
+    const statusBadge = r.status === 'expired'
+      ? `<span class="badge badge-done">Expired</span>`
+      : r.status === 'completed'
+      ? `<span class="badge badge-done">Completed</span>`
+      : `<span class="badge badge-done">${esc(r.status)}</span>`
+    const date = r.created_at ? new Date(r.created_at).toLocaleDateString() : '—'
+    return `<tr>
+      <td><strong>${esc(r.miner_name || '—')}</strong></td>
+      <td>${fmtMins(r.duration_minutes)}</td>
+      <td class="td-mono" style="font-size:0.78rem;">${esc(r.pool_url ? r.pool_url.slice(0,30) : 'Default')}</td>
+      <td class="td-mono" style="font-size:0.78rem;" title="${esc(r.payout_address)}">${esc(addrShort(r.payout_address))}</td>
+      <td class="td-btc">${(r.total_sats || 0).toLocaleString()}</td>
+      <td>${statusBadge}</td>
+      <td style="color:var(--muted);">${date}</td>
+    </tr>`
+  }).join('')
 }
 
-// ── Live stat refresh ──────────────────────────────────────────────────────────
+// ── Live stat refresh — polls /api/rentals/status/:id which returns miner stats
 async function refreshLiveStats() {
   for (const r of activeRentals) {
     try {
-      const { live } = await api.get(`/api/rentals/${r.id}/live`)
-      if (!live) continue
+      const d = await api.get(`/api/rentals/status/${r.id}`)
+      const miner = d.miner || {}
       const hsEl  = document.getElementById(`hs-${r.id}`)
       const tmpEl = document.getElementById(`tmp-${r.id}`)
       const pwrEl = document.getElementById(`pwr-${r.id}`)
-      if (hsEl)  hsEl.textContent  = (live.hashrate_ths || '—') + ' TH/s'
-      if (tmpEl) {
-        tmpEl.textContent = live.temp ? live.temp + '°C' : '—'
-        tmpEl.className = 'live-stat-val ' + (live.temp > 70 ? 'red' : live.temp > 60 ? 'yellow' : 'green')
+      if (hsEl && miner.last_hashrate != null) hsEl.textContent = miner.last_hashrate + ' TH/s'
+      if (tmpEl && miner.last_temp_c != null) {
+        tmpEl.textContent = miner.last_temp_c + '°C'
+        tmpEl.className = 'live-stat-val ' + (miner.last_temp_c > 70 ? 'red' : miner.last_temp_c > 60 ? 'yellow' : 'green')
       }
-      if (pwrEl) pwrEl.textContent = live.power_w ? live.power_w + 'W' : '—'
+      if (pwrEl && miner.last_power_w != null) pwrEl.textContent = miner.last_power_w + 'W'
     } catch {}
   }
 }
@@ -325,7 +322,6 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('btn-login').onclick = () => { window.location.href = '/' }
   updateNav()
   loadDashboard()
-  loadHistory()
   // Refresh live stats every 10s
   setInterval(refreshLiveStats, 10000)
 })

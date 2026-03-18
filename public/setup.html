@@ -85,12 +85,31 @@
 
     <!-- ── Step 2: Lightning / NWC ─────────────────────────── -->
     <div class="setup-form" id="form-2" style="display:none">
-      <h2 class="setup-form-title">Connect Lightning Wallet</h2>
+      <h2 class="setup-form-title">Identity &amp; Lightning Wallet</h2>
       <p class="setup-form-desc">
-        HashNode uses <strong>Nostr Wallet Connect (NWC)</strong> to create Lightning invoices
-        and verify payments. You'll need a NWC-compatible wallet on your node.
+        Connect your Nostr identity (you'll be the <strong>admin</strong> of this node) and
+        link your Lightning wallet via <strong>Nostr Wallet Connect (NWC)</strong>.
       </p>
 
+      <!-- Nostr identity -->
+      <div class="form-group">
+        <label class="form-label">Node Admin (Nostr Identity)</label>
+        <div style="display:flex;gap:8px;align-items:center;">
+          <input class="form-input mono" type="text" id="owner-pubkey" placeholder="npub… or hex pubkey (64 chars)" autocomplete="off" style="flex:1">
+          <button class="btn btn-ghost btn-sm" id="btn-get-pubkey" onclick="getNostrPubkey()">
+            Use Extension
+          </button>
+        </div>
+        <p class="form-hint">Your Nostr public key — grants you admin access. Install <a href="https://getalby.com" target="_blank" rel="noopener">Alby</a> or <a href="https://github.com/fiatjaf/nos2x" target="_blank" rel="noopener">nos2x</a> to auto-fill.</p>
+      </div>
+
+      <!-- Node name (optional) -->
+      <div class="form-group">
+        <label class="form-label">Node Name <span style="color:var(--muted);font-weight:400;">(optional)</span></label>
+        <input class="form-input" type="text" id="node-name" placeholder="My HashNode" maxlength="64">
+      </div>
+
+      <!-- NWC string -->
       <div class="form-group">
         <label class="form-label">NWC Connection String</label>
         <input
@@ -222,15 +241,34 @@ function showToast(msg, type = 'info') {
 }
 
 // ── Navigation ─────────────────────────────────────────────────────────────────
-function nextStep() {
+async function nextStep() {
   if (currentStep >= totalSteps) return
-  // Validate step 2: require NWC string
+  // Validate step 2: require pubkey + NWC string
   if (currentStep === 2) {
-    const nwc = document.getElementById('nwc-string').value.trim()
+    const pubkey = document.getElementById('owner-pubkey').value.trim().toLowerCase()
+    const nwc    = document.getElementById('nwc-string').value.trim()
+    const errEl  = document.getElementById('nwc-error')
+    if (!pubkey || !/^[0-9a-f]{64}$/.test(pubkey)) {
+      errEl.textContent = 'Please enter a valid Nostr pubkey (64 hex chars) or click "Use Extension".'
+      errEl.style.display = ''
+      return
+    }
     if (!nwc) {
-      const e = document.getElementById('nwc-error')
-      e.textContent = 'Please enter your NWC connection string.'
-      e.style.display = ''
+      errEl.textContent = 'Please enter your NWC connection string.'
+      errEl.style.display = ''
+      return
+    }
+    // Auto-save if not yet tested
+    try {
+      const nodeName = document.getElementById('node-name').value.trim()
+      await api.post('/api/setup/init', {
+        nwc_string:   nwc,
+        owner_pubkey: pubkey,
+        node_name:    nodeName || undefined,
+      })
+    } catch (e) {
+      document.getElementById('nwc-error').textContent = e.message
+      document.getElementById('nwc-error').style.display = ''
       return
     }
   }
@@ -260,14 +298,47 @@ function goToStep(n) {
   window.scrollTo(0, 0)
 }
 
+// ── Get Nostr pubkey from extension ────────────────────────────────────────────
+async function getNostrPubkey() {
+  const btn = document.getElementById('btn-get-pubkey')
+  const errEl = document.getElementById('nwc-error')
+  errEl.style.display = 'none'
+  if (!window.nostr) {
+    errEl.textContent = 'No Nostr extension found. Install Alby or nos2x, or paste your pubkey manually.'
+    errEl.style.display = ''
+    return
+  }
+  btn.disabled = true
+  btn.textContent = '…'
+  try {
+    const pubkey = await window.nostr.getPublicKey()
+    if (pubkey) {
+      document.getElementById('owner-pubkey').value = pubkey.toLowerCase()
+      showToast('Pubkey loaded from extension!', 'success')
+    }
+  } catch (e) {
+    errEl.textContent = 'Could not get pubkey: ' + (e.message || 'Extension error')
+    errEl.style.display = ''
+  } finally {
+    btn.disabled = false
+    btn.textContent = 'Use Extension'
+  }
+}
+
 // ── Test NWC ───────────────────────────────────────────────────────────────────
 async function testNwc() {
-  const nwc = document.getElementById('nwc-string').value.trim()
-  const errEl = document.getElementById('nwc-error')
-  const okEl  = document.getElementById('nwc-ok')
+  const nwc    = document.getElementById('nwc-string').value.trim()
+  const pubkey = document.getElementById('owner-pubkey').value.trim().toLowerCase()
+  const errEl  = document.getElementById('nwc-error')
+  const okEl   = document.getElementById('nwc-ok')
   errEl.style.display = 'none'
   okEl.style.display  = 'none'
 
+  if (!pubkey || !/^[0-9a-f]{64}$/.test(pubkey)) {
+    errEl.textContent = 'Please enter a valid Nostr pubkey (64 hex chars) or click "Use Extension".'
+    errEl.style.display = ''
+    return
+  }
   if (!nwc) {
     errEl.textContent = 'Please enter your NWC connection string first.'
     errEl.style.display = ''
@@ -279,7 +350,12 @@ async function testNwc() {
   btn.textContent = 'Testing…'
 
   try {
-    await api.post('/api/setup/init', { nwc_string: nwc })
+    const nodeName = document.getElementById('node-name').value.trim()
+    await api.post('/api/setup/init', {
+      nwc_string:   nwc,
+      owner_pubkey: pubkey,
+      node_name:    nodeName || undefined,
+    })
     okEl.style.display = ''
     showToast('Lightning connection verified!', 'success')
   } catch (e) {
