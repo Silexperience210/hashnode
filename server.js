@@ -2,7 +2,7 @@ import express from 'express'
 import cors from 'cors'
 import { fileURLToPath } from 'url'
 import { dirname, join } from 'path'
-import { getDb, isSetupComplete, getConfig } from './src/lib/db.js'
+import { getDb, isSetupComplete, getConfig, setConfig } from './src/lib/db.js'
 import { startMdnsAdvertise, startMdnsBrowse } from './src/lib/mdns.js'
 import { subscribeToNodeAnnouncements, publishNodeAnnouncement } from './src/lib/nostr-p2p.js'
 import { startTunnel, stopTunnel } from './src/lib/tunnel.js'
@@ -51,6 +51,11 @@ app.use((err, _req, res, _next) => {
 
 // ── Startup services ──────────────────────────────────────────────────────────
 async function startServices() {
+  // Sync CF_TOKEN from .env → DB (set by install.sh if user provided token upfront)
+  if (process.env.CF_TOKEN && !getConfig('cloudflare_token')) {
+    setConfig('cloudflare_token', process.env.CF_TOKEN)
+    console.log('[server] Cloudflare token loaded from .env → saved to DB')
+  }
   const { getNodePubkey } = await import('./src/lib/nostr-identity.js')
   const pubkey = getNodePubkey()
   const nodeName = getConfig('node_name') || 'HashNode'
