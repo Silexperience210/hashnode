@@ -127,18 +127,38 @@
         </p>
       </div>
 
-      <!-- Public URL (Cloudflare Tunnel) -->
+      <!-- Public URL — auto-detected from Cloudflare Tunnel -->
       <div class="form-group">
         <label class="form-label">
           Public URL
-          <span style="color:var(--muted);font-weight:400;">(optional — for internet access)</span>
+          <span id="tunnel-badge" style="display:none;margin-left:6px;font-size:0.72rem;background:var(--green);color:#000;padding:2px 7px;border-radius:20px;font-weight:600;">AUTO</span>
         </label>
-        <input class="form-input mono" type="url" id="public-url" placeholder="https://xxxx.trycloudflare.com">
-        <p class="form-hint">
-          Leave blank if you only want local network access.
-          For internet access, the installer sets up a <strong>Cloudflare Tunnel</strong> automatically —
-          run <code>sudo journalctl -u hashnode-tunnel -f</code> to get the URL and paste it here.
-          This URL is broadcast to other HashNode nodes via Nostr so they can link to your marketplace.
+
+        <!-- Detecting state -->
+        <div id="tunnel-detecting" style="display:flex;align-items:center;gap:10px;padding:10px 12px;background:var(--surface3);border-radius:var(--radius);border:1px solid var(--border);">
+          <div class="spinner" style="width:14px;height:14px;border-width:2px;flex-shrink:0;"></div>
+          <span style="font-size:0.82rem;color:var(--muted);">Waiting for Cloudflare Tunnel URL…</span>
+        </div>
+
+        <!-- Detected state -->
+        <div id="tunnel-ready" style="display:none;align-items:center;gap:10px;padding:10px 12px;background:rgba(34,197,94,0.08);border-radius:var(--radius);border:1px solid rgba(34,197,94,0.25);">
+          <span style="color:var(--green);font-size:1.1rem;flex-shrink:0;">✓</span>
+          <div style="flex:1;min-width:0;">
+            <div style="font-size:0.72rem;color:var(--muted);margin-bottom:2px;">Internet URL (auto-detected)</div>
+            <div id="tunnel-url-display" style="font-family:var(--font-mono);font-size:0.8rem;color:var(--green);word-break:break-all;"></div>
+          </div>
+          <button class="btn btn-ghost btn-sm" onclick="copyTunnelUrl()" id="btn-copy-tunnel">Copy</button>
+        </div>
+
+        <!-- Manual override -->
+        <input class="form-input mono" type="url" id="public-url"
+          placeholder="https://xxxx.trycloudflare.com (auto-filled above)"
+          style="margin-top:8px;font-size:0.8rem;"
+          autocomplete="off">
+        <p class="form-hint" style="margin-top:6px;">
+          Auto-detected from cloudflared running on this node. Only fill manually if
+          you're using a custom domain or self-managed tunnel.
+          This URL is broadcast to other HashNode nodes via Nostr.
         </p>
       </div>
 
@@ -310,9 +330,54 @@ function goToStep(n) {
     if (i < currentStep) el.classList.add('done')
     else if (i === currentStep) el.classList.add('active')
   }
+  // Start tunnel detection when entering step 2
+  if (currentStep === 2 && !tunnelUrl) startTunnelDetection()
   // Populate summary on step 4
   if (currentStep === 4) renderSummary()
   window.scrollTo(0, 0)
+}
+
+// ── Cloudflare Tunnel auto-detection (SSE) ─────────────────────────────────────
+let tunnelUrl = null
+
+function startTunnelDetection() {
+  const es = new EventSource('/api/setup/tunnel-url')
+  es.onmessage = (e) => {
+    try {
+      const { url } = JSON.parse(e.data)
+      if (url) {
+        tunnelUrl = url
+        // Auto-fill the manual input only if empty
+        const manualInput = document.getElementById('public-url')
+        if (!manualInput.value) manualInput.value = url
+
+        // Show detected state
+        document.getElementById('tunnel-detecting').style.display = 'none'
+        document.getElementById('tunnel-ready').style.display = 'flex'
+        document.getElementById('tunnel-url-display').textContent = url
+        document.getElementById('tunnel-badge').style.display = ''
+        showToast('🌍 Public URL ready! Clients can now reach your node.', 'success')
+      } else {
+        // Timed out — cloudflared not installed
+        document.getElementById('tunnel-detecting').innerHTML =
+          `<span style="color:var(--muted);font-size:0.82rem;">
+            cloudflared not found — <a href="https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/" target="_blank">install it</a>
+            or enter a public URL manually below. Local network still works.
+          </span>`
+      }
+    } catch {}
+    es.close()
+  }
+  es.onerror = () => es.close()
+}
+
+function copyTunnelUrl() {
+  const url = tunnelUrl || document.getElementById('tunnel-url-display').textContent
+  if (!url) return
+  navigator.clipboard.writeText(url).then(() => {
+    document.getElementById('btn-copy-tunnel').textContent = 'Copied!'
+    setTimeout(() => { document.getElementById('btn-copy-tunnel').textContent = 'Copy' }, 2000)
+  })
 }
 
 // ── Get Nostr pubkey from extension ────────────────────────────────────────────

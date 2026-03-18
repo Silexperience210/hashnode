@@ -15,6 +15,7 @@ import { validateNWC, makeInvoice } from '../lib/nwc.js'
 import { scanForBitaxe, getBitaxeStats } from '../lib/bitaxe-scanner.js'
 import { getNodeKeypair, getNodePubkey } from '../lib/nostr-identity.js'
 import { isValidPubkey } from '../lib/nostr-auth.js'
+import { getTunnelUrl } from '../lib/tunnel.js'
 
 const router = Router()
 
@@ -26,6 +27,31 @@ router.use((req, res, next) => {
     return res.redirect('/')
   }
   next()
+})
+
+// ── GET /tunnel-url — SSE stream: emits {url} when Cloudflare tunnel is ready ─
+// Allows the setup wizard to auto-fill the URL without the user doing anything.
+router.get('/tunnel-url', (req, res) => {
+  res.setHeader('Content-Type', 'text/event-stream')
+  res.setHeader('Cache-Control', 'no-cache')
+  res.setHeader('Connection', 'keep-alive')
+  res.flushHeaders()
+
+  const send = (url) => res.write(`data: ${JSON.stringify({ url })}\n\n`)
+
+  // If already available, send immediately
+  const existing = getTunnelUrl()
+  if (existing) { send(existing); res.end(); return }
+
+  // Otherwise poll every 2s until URL appears (max 120s)
+  let attempts = 0
+  const timer = setInterval(() => {
+    const url = getTunnelUrl()
+    if (url) { clearInterval(timer); send(url); res.end(); return }
+    if (++attempts >= 60) { clearInterval(timer); send(null); res.end() }
+  }, 2000)
+
+  req.on('close', () => clearInterval(timer))
 })
 
 // ── GET /status ───────────────────────────────────────────────────────────────
@@ -43,7 +69,7 @@ router.get('/status', (req, res) => {
     step,
     node_pubkey:  getNodePubkey(),
     node_name:    getConfig('node_name') || '',
-    public_url:   getConfig('cloudflare_url') || '',
+    public_url:   getTunnelUrl() || getConfig('cloudflare_url') || '',
     has_nwc:      hasNwc,
     has_owner:    hasOwner,
   })

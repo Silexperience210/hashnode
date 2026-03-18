@@ -5,6 +5,7 @@ import { dirname, join } from 'path'
 import { getDb, isSetupComplete, getConfig } from './src/lib/db.js'
 import { startMdnsAdvertise, startMdnsBrowse } from './src/lib/mdns.js'
 import { subscribeToNodeAnnouncements, publishNodeAnnouncement } from './src/lib/nostr-p2p.js'
+import { startTunnel, stopTunnel } from './src/lib/tunnel.js'
 
 import authRouter from './src/api/auth.js'
 import minersRouter from './src/api/miners.js'
@@ -98,10 +99,17 @@ async function startServices() {
     }
   }
 
-  // First announce after 5 s (give app time to fully start), then every 30 min
-  setTimeout(announceNode, 5000)
+  // Start Cloudflare Tunnel — URL is auto-captured and saved to DB
+  startTunnel(PORT)
+
+  // Announce after 30s (give tunnel time to get its URL), then every 30 min
+  setTimeout(announceNode, 30000)
   setInterval(announceNode, 30 * 60 * 1000)
 }
+
+// Graceful shutdown
+process.on('SIGTERM', () => { stopTunnel(); process.exit(0) })
+process.on('SIGINT',  () => { stopTunnel(); process.exit(0) })
 
 // ── Listen ────────────────────────────────────────────────────────────────────
 app.listen(PORT, '0.0.0.0', () => {

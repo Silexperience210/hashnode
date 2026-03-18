@@ -66,28 +66,7 @@ else
   echo -e "${GREEN}cloudflared already installed: $(cloudflared --version 2>&1 | head -1).${NC}"
 fi
 
-# 6. Create Cloudflare Tunnel systemd service (quick tunnel — no account required)
-sudo tee /etc/systemd/system/hashnode-tunnel.service > /dev/null <<'TUNNEL_EOF'
-[Unit]
-Description=HashNode Cloudflare Tunnel
-After=network.target hashnode.service
-Requires=hashnode.service
-
-[Service]
-Type=simple
-User=pi
-ExecStart=/usr/bin/cloudflared tunnel --url http://localhost:3000 --no-autoupdate
-Restart=always
-RestartSec=10
-StandardOutput=journal
-StandardError=journal
-
-[Install]
-WantedBy=multi-user.target
-TUNNEL_EOF
-echo -e "${GREEN}Cloudflare Tunnel service created.${NC}"
-
-# 7. Clone or update the repo
+# 6. Clone or update the repo
 if [ -d /opt/hashnode ]; then
   echo -e "${YELLOW}Updating existing HashNode installation...${NC}"
   cd /opt/hashnode && sudo git pull || { echo -e "${RED}Error: Failed to update repository.${NC}"; exit 1; }
@@ -144,23 +123,24 @@ echo -e "${GREEN}Systemd service created.${NC}"
 echo -e "${YELLOW}Setting hostname to 'hashnode'...${NC}"
 sudo hostnamectl set-hostname hashnode || { echo -e "${RED}Error: Failed to set hostname.${NC}"; exit 1; }
 
-# 13. Enable + start services
-echo -e "${YELLOW}Enabling services...${NC}"
+# 13. Enable + start HashNode service
+echo -e "${YELLOW}Enabling HashNode service...${NC}"
 sudo systemctl daemon-reload
 sudo systemctl enable hashnode
 sudo systemctl start hashnode || { echo -e "${RED}Error: Failed to start hashnode service.${NC}"; exit 1; }
-sudo systemctl enable hashnode-tunnel
-sudo systemctl start hashnode-tunnel || echo -e "${YELLOW}Tunnel service failed to start — cloudflared may not be installed.${NC}"
-echo -e "${GREEN}Services started.${NC}"
+echo -e "${GREEN}HashNode service started.${NC}"
 
-# 14. Get local IP and tunnel URL
+# 14. Get local IP and wait for tunnel URL to appear in logs
 LOCAL_IP=$(hostname -I | awk '{print $1}')
 
-# Wait a few seconds for tunnel to get its URL
-echo -e "${YELLOW}Waiting for Cloudflare Tunnel URL...${NC}"
-sleep 6
-TUNNEL_URL=$(sudo journalctl -u hashnode-tunnel -n 50 --no-pager 2>/dev/null \
-  | grep -oP 'https://[a-z0-9\-]+\.trycloudflare\.com' | head -1 || echo "")
+echo -e "${YELLOW}Waiting for Cloudflare Tunnel URL (up to 30s)...${NC}"
+TUNNEL_URL=""
+for i in $(seq 1 15); do
+  sleep 2
+  TUNNEL_URL=$(sudo journalctl -u hashnode -n 100 --no-pager 2>/dev/null \
+    | grep -oP 'https://[a-z0-9\-]+\.trycloudflare\.com' | head -1 || echo "")
+  if [ -n "$TUNNEL_URL" ]; then break; fi
+done
 
 # 15. Success
 echo ""
@@ -176,17 +156,13 @@ if [ -n "$TUNNEL_URL" ]; then
   echo -e "${CYAN}  Public internet (Cloudflare Tunnel):${NC}"
   echo -e "    ${GREEN}${TUNNEL_URL}${NC}"
   echo ""
-  echo -e "${YELLOW}  → Copy this URL and paste it in the setup wizard (step 2)${NC}"
-  echo -e "${YELLOW}    so remote clients can find your node via Nostr P2P.${NC}"
+  echo -e "${GREEN}  ✓ The setup wizard will auto-detect this URL.${NC}"
 else
   echo -e "${CYAN}  Public URL:${NC}"
-  echo -e "    Run: ${YELLOW}sudo journalctl -u hashnode-tunnel -f${NC}"
-  echo -e "    Look for: https://xxxx.trycloudflare.com"
-  echo -e "    Then paste it in the setup wizard (step 2)."
+  echo -e "    Still connecting to Cloudflare — open the setup wizard,"
+  echo -e "    step 2 will show the URL automatically when ready."
 fi
 echo ""
-echo -e "${YELLOW}  Next steps:${NC}"
-echo -e "    1. Open http://hashnode.local:3000 in your browser"
-echo -e "    2. Complete the setup wizard (NWC + Nostr identity)"
-echo -e "    3. Paste the Cloudflare URL in step 2 for internet access"
+echo -e "${YELLOW}  → Open the setup wizard:${NC}"
+echo -e "    http://hashnode.local:3000"
 echo ""
